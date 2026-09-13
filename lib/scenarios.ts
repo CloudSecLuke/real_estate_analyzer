@@ -1,0 +1,147 @@
+import {
+  computeScenario,
+  formatGaps,
+  marketRentFromFmr,
+  section8Rent,
+} from "./metrics";
+import type {
+  AnalyzeResponse,
+  Assumptions,
+  PinMetrics,
+  SavedPin,
+  ScenarioResult,
+} from "./types";
+
+export interface ScenarioSet {
+  market: ScenarioResult | null;
+  s8: ScenarioResult | null;
+  str: ScenarioResult | null;
+  fmrRent: number | null;
+  taxRate: number;
+  taxSource: string;
+  marketRentSource: "override" | "rent AVM" | "FMR" | null;
+}
+
+/** Compute both scenarios from fetched property data + assumptions. */
+export function computeScenariosFromData(
+  data: AnalyzeResponse,
+  a: Assumptions
+): ScenarioSet {
+  const beds = Math.min(4, Math.max(0, a.bedrooms)) as 0 | 1 | 2 | 3 | 4;
+  const fmrRent = data.fmr ? data.fmr.byBedroom[beds] : null;
+  const attom = data.attom ?? null;
+
+  // Tax priority: manual override > actual tax bill (ATTOM) > state estimate.
+  // Dividing the actual bill by price keeps computeScenario's price×rate math
+  // producing the real monthly tax regardless of what price is entered.
+  let taxRate: number;
+  let taxSource: string;
+  if (a.taxRateOverride != null && a.taxRateOverride !== 0) {
+    taxRate = a.taxRateOverride / 100;
+    taxSource = "manual override";
+  } else if (attom?.annualTaxAmount && a.price > 0) {
+    taxRate = attom.annualTaxAmount / a.price;
+    taxSource = `actual${attom.taxYear ? ` ${attom.taxYear}` : ""} tax bill via ATTOM`;
+  } else {
+    taxRate = data.tax.effectiveRate;
+    taxSource = data.tax.source;
+  }
+  const insuranceMult = data.flood.highRisk
+    ? 1.4
+    : data.flood.moderateRisk
+      ? 1.15
+      : 1;
+
+  // Market rent priority: manual override > ATTOM rental AVM (property-
+  // specific) > HUD FMR baseline. Section 8 always keys off FMR.
+  let marketRent: number | null;
+  let marketRentSource: ScenarioSet["marketRentSource"];
+  if (a.marketRentOverride != null && a.marketRentOverride > 0) {
+    marketRent = a.marketRentOverride;
+    marketRentSource = "override";
+  } else if (attom?.rentalAvm) {
+    marketRent = Math.round(attom.rentalAvm);
+    marketRentSource = "rent AVM";
+  } else if (fmrRent != null) {
+    marketRent = marketRentFromFmr(fmrRent);
+    marketRentSource = "FMR";
+  } else {
+    marketRent = null;
+    marketRentSource = null;
+  }
+
+  const market =
+    marketRent != null
+      ? computeScenario(
+          "Market Rent",
+          marketRent,
+          a.vacancyPctMarket,
+          a,
+          taxRate,
+          insuranceMult
+        )
+      : null;
+  const s8 =
+    fmrRent != null
+      ? computeScenario(
+          "Section 8",
+          section8Rent(fmrRent, a.paymentStandardPct),
+          a.vacancyPctSection8,
+          a,
+          taxRate,
+          insuranceMult
+        )
+      : null;
+
+  // Short-term rental: Mashvisor's revenue figure is already occupancy-
+  // adjusted, so vacancy is 0; STR-specific management % and owner-paid
+  // operating costs come from their own assumption fields.
+  const strRevenue = data.mashvisor?.str?.monthlyRevenue;
+  const str = strRevenue
+    ? computeScenario(
+        "Airbnb (STR)",
+        Math.round(strRevenue),
+        0,
+        {
+          ...a,
+          managementPct: a.strManagementPct,
+          otherMonthlyExpense: a.otherMonthlyExpense + a.strOtherMonthlyExpense,
+        },
+        taxRate,
+        insuranceMult
+      )
+    : null;
+
+  return { market, s8, str, fmrRent, taxRate, taxSource, marketRentSource };
+}
+
+export function toPinMetrics(s: ScenarioResult): PinMetrics {
+  return {
+    monthlyCashFlow: Math.round(s.monthlyCashFlow),
+    rating: s.rating,
+    almost: s.ratingDetail.almost,
+    gapText: s.ratingDetail.almost ? formatGaps(s.ratingDetail) : "",
+    capRatePct: s.capRatePct,
+    cashOnCashPct: s.cashOnCashPct,
+    rent: s.monthlyRent,
+  };
+}
+
+export function buildPin(
+  data: AnalyzeResponse,
+  scenarios: ScenarioSet,
+  price: number,
+  bedrooms: number
+): SavedPin {
+  return {
+    id: data.property.matchedAddress,
+    address: data.property.matchedAddress,
+    lat: data.property.lat,
+    lon: data.property.lon,
+    price,
+    bedrooms,
+    market: scenarios.market ? toPinMetrics(scenarios.market) : undefined,
+    s8: scenarios.s8 ? toPinMetrics(scenarios.s8) : undefined,
+    str: scenarios.str ? toPinMetrics(scenarios.str) : undefined,
+  };
+}
