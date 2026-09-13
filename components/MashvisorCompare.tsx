@@ -148,6 +148,17 @@ export default function MashvisorCompare({
                     </td>
                   </tr>
                 )}
+                {scenarios?.acsRentForBeds != null && (
+                  <tr className="border-b border-zinc-100 dark:border-zinc-800">
+                    <td className="py-1">County ACS median (inflated)</td>
+                    <td className="py-1 text-right tabular-nums">
+                      {usd(scenarios.acsRentForBeds)}
+                    </td>
+                    <td className="py-1 text-right text-zinc-500">
+                      {delta(scenarios.acsRentForBeds, ourRent)}
+                    </td>
+                  </tr>
+                )}
                 {data.attom?.rentalAvm != null && (
                   <tr className="border-b border-zinc-100 dark:border-zinc-800">
                     <td className="py-1">ATTOM rent AVM</td>

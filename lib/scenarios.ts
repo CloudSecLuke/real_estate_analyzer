@@ -17,9 +17,15 @@ export interface ScenarioSet {
   s8: ScenarioResult | null;
   str: ScenarioResult | null;
   fmrRent: number | null;
+  acsRentForBeds: number | null;
   taxRate: number;
   taxSource: string;
-  marketRentSource: "override" | "rent AVM" | "FMR" | null;
+  marketRentSource:
+    | "override"
+    | "rent AVM"
+    | "FMR"
+    | "local ACS median"
+    | null;
 }
 
 /** Compute both scenarios from fetched property data + assumptions. */
@@ -53,7 +59,13 @@ export function computeScenariosFromData(
       : 1;
 
   // Market rent priority: manual override > ATTOM rental AVM (property-
-  // specific) > HUD FMR baseline. Section 8 always keys off FMR.
+  // specific) > conservative area estimate. For the area estimate we take
+  // the LOWER of HUD FMR and the county's ACS median for this bedroom
+  // count: FMR is area-wide and can carry adjustment factors borrowed from
+  // larger geographies (Decatur's FMR runs ~30% above local ACS medians),
+  // so the county median is the reality check in soft markets. Section 8
+  // still keys off FMR — that's what payment standards are based on.
+  const acsRentForBeds = data.acsRent?.byBedroom?.[beds] ?? null;
   let marketRent: number | null;
   let marketRentSource: ScenarioSet["marketRentSource"];
   if (a.marketRentOverride != null && a.marketRentOverride > 0) {
@@ -62,9 +74,18 @@ export function computeScenariosFromData(
   } else if (attom?.rentalAvm) {
     marketRent = Math.round(attom.rentalAvm);
     marketRentSource = "rent AVM";
-  } else if (fmrRent != null) {
-    marketRent = marketRentFromFmr(fmrRent);
-    marketRentSource = "FMR";
+  } else if (fmrRent != null || acsRentForBeds != null) {
+    const fmrDerived = fmrRent != null ? marketRentFromFmr(fmrRent) : null;
+    if (
+      acsRentForBeds != null &&
+      (fmrDerived == null || acsRentForBeds < fmrDerived)
+    ) {
+      marketRent = acsRentForBeds;
+      marketRentSource = "local ACS median";
+    } else {
+      marketRent = fmrDerived;
+      marketRentSource = "FMR";
+    }
   } else {
     marketRent = null;
     marketRentSource = null;
@@ -112,7 +133,16 @@ export function computeScenariosFromData(
       )
     : null;
 
-  return { market, s8, str, fmrRent, taxRate, taxSource, marketRentSource };
+  return {
+    market,
+    s8,
+    str,
+    fmrRent,
+    acsRentForBeds,
+    taxRate,
+    taxSource,
+    marketRentSource,
+  };
 }
 
 export function toPinMetrics(s: ScenarioResult): PinMetrics {

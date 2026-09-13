@@ -193,7 +193,7 @@ function ScenarioCard({
   marketRentBenchmark?: number;
   paymentStandardPct?: number;
   cityLabel?: string | null;
-  rentSource?: "override" | "rent AVM" | "FMR" | null;
+  rentSource?: "override" | "rent AVM" | "FMR" | "local ACS median" | null;
 }) {
   const positive = s.monthlyCashFlow > 0;
   const almost = s.ratingDetail.almost;
@@ -282,6 +282,16 @@ function ScenarioCard({
           specific property. In cheaper submarkets actual rent often runs well
           below FMR (and above it in hot pockets) — verify with local comps or
           a property manager before trusting this number.
+        </div>
+      )}
+
+      {!isS8 && rentSource === "local ACS median" && (
+        <div className="rounded-md bg-zinc-50 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400 px-3 py-2 text-xs">
+          Rent here uses the <b>county&apos;s median rent for this bedroom
+          count</b> (Census ACS, inflated to current) because the HUD FMR for
+          this area runs above what local units actually rent for — FMRs can
+          carry adjustment factors borrowed from larger metro areas. This is
+          the conservative estimate; verify with local comps.
         </div>
       )}
 
@@ -773,6 +783,18 @@ export default function Home() {
                   <>: <b>{usd(scenarios.fmrRent)}</b>/mo for {bedrooms} BR</>
                 )}
                 <InfoTip text="HUD Fair Market Rent — the 40th-percentile gross rent for this area (ZIP-level where available). It's the basis for Section 8 payment standards and our conservative market-rent estimate." />
+              </span>
+            )}
+            {scenarios?.acsRentForBeds != null && (
+              <span>
+                Local median rent: <b>{usd(scenarios.acsRentForBeds)}</b>/mo for{" "}
+                {bedrooms} BR
+                <InfoTip
+                  text={
+                    data.acsRent?.source ??
+                    "County median gross rent for this bedroom count (Census ACS), inflated to current dollars — the local reality check on the area-wide FMR."
+                  }
+                />
               </span>
             )}
             <span>

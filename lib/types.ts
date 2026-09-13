@@ -79,12 +79,22 @@ export interface MashvisorData {
   listing?: ListingInfo;
 }
 
+// County median gross rents by bedroom (Census ACS), inflated to current —
+// the local reality check on area-wide FMR.
+export interface AcsRentData {
+  byBedroom: Partial<Record<0 | 1 | 2 | 3 | 4, number>>;
+  acsYear: number;
+  inflationFactor: number;
+  source: string;
+}
+
 export interface AnalyzeResponse {
   property: GeocodeResult;
   fmr: FmrData | null;
   fmrError?: string;
   flood: FloodData;
   tax: TaxEstimate;
+  acsRent?: AcsRentData | null;
   attom?: AttomData | null;
   attomError?: string;
   mashvisor?: MashvisorData | null;
