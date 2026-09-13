@@ -225,9 +225,12 @@ export default function Home() {
   const setA = <K extends keyof typeof adv>(k: K, v: (typeof adv)[K]) =>
     setAdv((p) => ({ ...p, [k]: v }));
 
-  // Map state — pins persist across sessions via localStorage
+  // Map state — pins + assumptions persist per-user in Postgres, with
+  // localStorage as offline fallback and one-time migration source
   const [savedPins, setSavedPins] = useState<SavedPin[]>([]);
   const [pinsLoaded, setPinsLoaded] = useState(false);
+  const [user, setUser] = useState<string | null>(null);
+  const [persistent, setPersistent] = useState(false);
   const [colorBy, setColorBy] = useState<ScenarioKey>("market");
   const [ratingFilter, setRatingFilter] = useState<Set<Rating>>(
     new Set(ALL_RATINGS)
@@ -235,18 +238,59 @@ export default function Home() {
   const [focusId, setFocusId] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(PINS_KEY);
-      if (raw) setSavedPins(JSON.parse(raw));
-    } catch {
-      // corrupted storage — start fresh
-    }
-    setPinsLoaded(true);
+    (async () => {
+      let pins: SavedPin[] = [];
+      try {
+        const res = await fetch("/api/pins");
+        if (res.status === 401) {
+          window.location.href = "/login";
+          return;
+        }
+        const json = await res.json();
+        setUser(json.user ?? null);
+        setPersistent(Boolean(json.persistent));
+        pins = Array.isArray(json.pins) ? json.pins : [];
+        if (json.assumptions) setAdv((p) => ({ ...p, ...json.assumptions }));
+      } catch {
+        // server unreachable — run local-only
+      }
+      if (pins.length === 0) {
+        // migrate any pre-auth localStorage pins into the account
+        try {
+          const raw = localStorage.getItem(PINS_KEY);
+          if (raw) {
+            const local = JSON.parse(raw);
+            if (Array.isArray(local)) pins = local;
+          }
+        } catch {
+          // corrupted storage — start fresh
+        }
+      }
+      setSavedPins(pins);
+      setPinsLoaded(true);
+    })();
   }, []);
 
   useEffect(() => {
-    if (pinsLoaded) localStorage.setItem(PINS_KEY, JSON.stringify(savedPins));
-  }, [savedPins, pinsLoaded]);
+    if (!pinsLoaded) return;
+    localStorage.setItem(PINS_KEY, JSON.stringify(savedPins));
+    if (!persistent) return;
+    const t = setTimeout(() => {
+      fetch("/api/pins", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pins: savedPins, assumptions: adv }),
+      }).catch(() => {
+        // transient save failure — localStorage still has the data
+      });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [savedPins, adv, pinsLoaded, persistent]);
+
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    window.location.href = "/login";
+  }
 
   async function analyze(e: React.FormEvent) {
     e.preventDefault();
@@ -307,14 +351,30 @@ export default function Home() {
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8 flex flex-col gap-6">
-      <header>
-        <h1 className="text-2xl font-bold">Real Estate Cash Flow Analyzer</h1>
-        <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
-          Enter an address and price — get monthly cash flow, ROI, cap rate and a
-          deal rating for market-rate and Section 8 rentals. Built on free HUD,
-          FEMA and Census data, upgraded with ATTOM property records when an API
-          key is configured.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Real Estate Cash Flow Analyzer</h1>
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
+            Enter an address and price — get monthly cash flow, ROI, cap rate and a
+            deal rating for market-rate and Section 8 rentals. Built on free HUD,
+            FEMA and Census data, upgraded with ATTOM property records when an API
+            key is configured.
+          </p>
+        </div>
+        {user && (
+          <div className="flex items-center gap-2 text-sm whitespace-nowrap">
+            <span className="text-zinc-500 dark:text-zinc-400">
+              {user}
+              {!persistent && " (local only)"}
+            </span>
+            <button
+              onClick={signOut}
+              className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-zinc-600 dark:text-zinc-300"
+            >
+              Sign out
+            </button>
+          </div>
+        )}
       </header>
 
       <form

@@ -17,9 +17,20 @@ cash flow.
 Every analyzed property is saved automatically to the **Deal Map**
 (Leaflet + OpenStreetMap — free, no API key): pins are color-coded by rating,
 popups show cash flow for both scenarios, and you can toggle coloring by
-Market vs Section 8, filter by rating, and manage the pin list in the sorted
-table below the map. Pins persist in the browser's localStorage — no database
-or account needed.
+Market vs Section 8 vs Airbnb, filter by rating, and manage the pin list in
+the sorted table below the map. Pins and assumptions persist per-user in
+Neon Postgres (localStorage is the offline fallback and one-time migration
+source).
+
+## Auth & persistence
+
+The app is gated by `proxy.ts` behind a signed session cookie (HMAC,
+30-day expiry). Exactly two accounts exist — `luke.miller` and
+`bart.miller` — with scrypt password hashes stored in env vars, not in
+code. Unauthenticated pages redirect to `/login`; unauthenticated API
+calls get 401, which also protects the paid ATTOM/Mashvisor quotas.
+Per-user state (map pins + assumptions) lives in a single `user_state`
+table (jsonb) in Neon Postgres, saved with a debounce from the client.
 
 ## Data sources
 
