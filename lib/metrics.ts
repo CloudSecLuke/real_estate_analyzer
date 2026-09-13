@@ -39,7 +39,7 @@ export function monthlyMortgagePayment(
   return (principal * r) / (1 - Math.pow(1 + r, -n));
 }
 
-interface TierReq {
+export interface TierReq {
   rating: Rating;
   cf: number; // monthly cash flow per unit
   coc: number; // cash-on-cash %
@@ -47,8 +47,9 @@ interface TierReq {
   cfExclusive?: boolean; // Good requires cf strictly > threshold
 }
 
-// Best tier first. Poor is the implicit floor.
-const TIERS: TierReq[] = [
+// Best tier first. Poor is the implicit floor. Exported so the UI can show
+// "why this rating" checklists against the same numbers.
+export const TIERS: TierReq[] = [
   { rating: "Rare", cf: 400, coc: 12, cap: 8 },
   { rating: "Fantastic", cf: 250, coc: 10 },
   { rating: "Great", cf: 150, coc: 8 },

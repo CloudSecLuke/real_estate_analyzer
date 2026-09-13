@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { DEFAULT_ASSUMPTIONS, formatGaps, RATING_COLORS } from "@/lib/metrics";
+import {
+  DEFAULT_ASSUMPTIONS,
+  formatGaps,
+  RATING_COLORS,
+  TIERS,
+} from "@/lib/metrics";
+import InfoTip from "@/components/InfoTip";
 import { buildPin, computeScenariosFromData } from "@/lib/scenarios";
 import BatchImport from "@/components/BatchImport";
 import MashvisorCompare from "@/components/MashvisorCompare";
@@ -97,9 +103,101 @@ function NumInput({
   );
 }
 
-function ScenarioCard({ s }: { s: ScenarioResult }) {
+const TERM_HELP = {
+  cashFlow:
+    "What's left in your pocket each month after every expense AND the mortgage payment. Positive = the property pays you monthly.",
+  rent: "The monthly rent this scenario assumes. Market uses the best available estimate (your override, rent AVM, or HUD FMR); Section 8 uses FMR × payment standard; Airbnb uses occupancy-adjusted revenue.",
+  coc: "Cash-on-cash return: annual cash flow ÷ the actual cash you put in (down payment + closing costs + rehab). Think of it as the interest rate your invested cash earns.",
+  cap: "Capitalization rate: net operating income ÷ purchase price. The return if you'd paid all cash — ignores the mortgage, so you can compare properties regardless of financing.",
+  grm: "Gross Rent Multiplier: price ÷ one year of rent. How many years of gross rent it takes to pay back the price — lower means you're buying rent cheaper.",
+  noi: "Net Operating Income: yearly income minus operating expenses (taxes, insurance, maintenance, management, vacancy) — before any mortgage payment.",
+  cashInvested:
+    "Total cash out of pocket to do the deal: down payment + closing costs + rehab budget. NOT the mortgage. This is the denominator of cash-on-cash ROI.",
+  pi: "Principal & Interest — the monthly loan payment. Taxes and insurance are itemized separately here rather than escrowed into the payment.",
+  maintenance:
+    "Monthly reserve set aside for repairs and eventual big-ticket items (roof, HVAC). Default is 1% of the property value per year.",
+  vacancy:
+    "Expected rent lost while the unit sits empty between tenants, as a % of rent.",
+  management:
+    "Property manager's cut of collected rent. Set it to 0 under advanced assumptions if you self-manage.",
+} as const;
+
+function WhyRating({ s, units }: { s: ScenarioResult; units: number }) {
+  const cfPerUnit = s.monthlyCashFlow / Math.max(1, units);
+  // For Poor, judge against the lowest tier so the misses are visible
+  const tier = TIERS.find((t) => t.rating === s.rating) ?? TIERS[TIERS.length - 1];
+  const rows = [
+    {
+      label: `Cash flow${units > 1 ? " per unit" : ""}`,
+      value: `${usd(cfPerUnit)}/mo`,
+      req: `${tier.cfExclusive ? ">" : "≥"} ${usd(tier.cf)}/mo`,
+      pass: tier.cfExclusive ? cfPerUnit > tier.cf : cfPerUnit >= tier.cf,
+    },
+    {
+      label: "Cash-on-cash",
+      value: `${s.cashOnCashPct.toFixed(1)}%`,
+      req: `≥ ${tier.coc}%`,
+      pass: s.cashOnCashPct >= tier.coc,
+    },
+    ...(tier.cap !== undefined
+      ? [
+          {
+            label: "Cap rate",
+            value: `${s.capRatePct.toFixed(1)}%`,
+            req: `≥ ${tier.cap}%`,
+            pass: s.capRatePct >= tier.cap,
+          },
+        ]
+      : []),
+  ];
+  return (
+    <details className="text-sm">
+      <summary className="cursor-pointer text-zinc-500 dark:text-zinc-400">
+        Why {s.rating}?
+      </summary>
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        {s.rating === "Poor"
+          ? "Fails the minimum (Good) thresholds:"
+          : `Meets every ${s.rating}-tier threshold${
+              s.rating !== "Rare" ? " (but not the next tier up)" : ""
+            }:`}
+      </p>
+      <table className="mt-1 w-full">
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.label} className="border-b border-zinc-100 dark:border-zinc-800">
+              <td className="py-1 text-zinc-600 dark:text-zinc-300">{r.label}</td>
+              <td className="py-1 text-right tabular-nums">{r.value}</td>
+              <td className="py-1 text-right text-zinc-500 w-24">{r.req}</td>
+              <td className={`py-1 text-right w-6 ${r.pass ? "text-emerald-600" : "text-red-600"}`}>
+                {r.pass ? "✓" : "✗"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
+  );
+}
+
+function ScenarioCard({
+  s,
+  units = 1,
+  marketRentBenchmark,
+  paymentStandardPct,
+}: {
+  s: ScenarioResult;
+  units?: number;
+  marketRentBenchmark?: number;
+  paymentStandardPct?: number;
+}) {
   const positive = s.monthlyCashFlow > 0;
   const almost = s.ratingDetail.almost;
+  const isS8 = s.label === "Section 8";
+  const s8AboveMarket =
+    isS8 &&
+    marketRentBenchmark != null &&
+    s.monthlyRent > marketRentBenchmark * 1.05;
   return (
     <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
@@ -128,6 +226,7 @@ function ScenarioCard({ s }: { s: ScenarioResult }) {
       <div>
         <div className="text-sm text-zinc-500 dark:text-zinc-400">
           Monthly cash flow (after mortgage)
+          <InfoTip text={TERM_HELP.cashFlow} />
         </div>
         <div
           className={`text-4xl font-bold tabular-nums ${
@@ -148,34 +247,104 @@ function ScenarioCard({ s }: { s: ScenarioResult }) {
         )}
       </div>
 
+      {s8AboveMarket && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 text-amber-800 dark:text-amber-300 px-3 py-2 text-xs">
+          Heads up: this assumes {usd(s.monthlyRent)}/mo — above the estimated
+          market rent of {usd(marketRentBenchmark!)}/mo. Housing authorities
+          run a &ldquo;rent reasonableness&rdquo; check and won&apos;t approve
+          rent above comparable unassisted units, so the achievable Section 8
+          rent is likely closer to the market figure. Re-run with a lower
+          payment standard % to see the conservative case.
+        </div>
+      )}
+
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
         <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">Rent</dt>
+          <dt className="text-zinc-500 dark:text-zinc-400">
+            Rent
+            <InfoTip text={TERM_HELP.rent} />
+          </dt>
           <dd className="font-semibold tabular-nums">{usd(s.monthlyRent)}/mo</dd>
         </div>
         <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">Cash-on-cash ROI</dt>
+          <dt className="text-zinc-500 dark:text-zinc-400">
+            Cash-on-cash ROI
+            <InfoTip text={TERM_HELP.coc} />
+          </dt>
           <dd className="font-semibold tabular-nums">
             {s.cashOnCashPct.toFixed(1)}%
           </dd>
         </div>
         <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">Cap rate</dt>
+          <dt className="text-zinc-500 dark:text-zinc-400">
+            Cap rate
+            <InfoTip text={TERM_HELP.cap} />
+          </dt>
           <dd className="font-semibold tabular-nums">{s.capRatePct.toFixed(1)}%</dd>
         </div>
         <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">GRM</dt>
+          <dt className="text-zinc-500 dark:text-zinc-400">
+            GRM
+            <InfoTip text={TERM_HELP.grm} />
+          </dt>
           <dd className="font-semibold tabular-nums">{s.grm.toFixed(1)}</dd>
         </div>
         <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">NOI (annual)</dt>
+          <dt className="text-zinc-500 dark:text-zinc-400">
+            NOI (annual)
+            <InfoTip text={TERM_HELP.noi} />
+          </dt>
           <dd className="font-semibold tabular-nums">{usd(s.noi)}</dd>
         </div>
         <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">Cash invested</dt>
+          <dt className="text-zinc-500 dark:text-zinc-400">
+            Cash invested
+            <InfoTip text={TERM_HELP.cashInvested} />
+          </dt>
           <dd className="font-semibold tabular-nums">{usd(s.cashInvested)}</dd>
         </div>
       </dl>
+
+      <WhyRating s={s} units={units} />
+
+      {isS8 && (
+        <details className="text-sm">
+          <summary className="cursor-pointer text-zinc-500 dark:text-zinc-400">
+            How the Section 8 numbers work
+          </summary>
+          <div className="mt-2 flex flex-col gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+            <p>
+              HUD publishes a <b>Fair Market Rent (FMR)</b> for every area — the
+              40th-percentile gross rent, i.e. what the cheaper 40% of decent
+              units rent for (ZIP-level &ldquo;Small Area&rdquo; FMR where
+              available). The local housing authority (PHA) sets a{" "}
+              <b>payment standard</b> between 90% and 120% of FMR
+              {paymentStandardPct != null && (
+                <>
+                  {" "}
+                  — this card assumes <b>{paymentStandardPct}%</b>
+                </>
+              )}
+              . The voucher covers the gap between the tenant&apos;s ~30%
+              income contribution and the approved rent, paid directly to you.
+            </p>
+            <p>
+              Vacancy defaults to 2% (vs 5% market) because the voucher portion
+              keeps paying while a tenant stays, and demand for voucher-ready
+              units is deep. Offsets: annual PHA inspections, and initial
+              lease-up takes longer.
+            </p>
+            <p>
+              <b>The number to verify:</b> the PHA won&apos;t approve rent
+              above comparable unassisted units nearby (&ldquo;rent
+              reasonableness&rdquo;). In soft markets FMR can sit far above
+              real market rent, making this card look better than what the PHA
+              will actually approve. Call the local PHA with a specific unit
+              before relying on FMR × payment standard.
+            </p>
+          </div>
+        </details>
+      )}
 
       <details className="text-sm">
         <summary className="cursor-pointer text-zinc-500 dark:text-zinc-400">
@@ -185,17 +354,20 @@ function ScenarioCard({ s }: { s: ScenarioResult }) {
           <tbody>
             {(
               [
-                ["Mortgage (P&I)", s.monthlyPI],
-                ["Property taxes", s.expenses.taxes],
-                ["Insurance", s.expenses.insurance],
-                ["Maintenance reserve", s.expenses.maintenance],
-                ["Management", s.expenses.management],
-                ["Vacancy allowance", s.expenses.vacancy],
-                ["Other (HOA/utilities)", s.expenses.other],
+                ["Mortgage (P&I)", s.monthlyPI, TERM_HELP.pi],
+                ["Property taxes", s.expenses.taxes, null],
+                ["Insurance", s.expenses.insurance, null],
+                ["Maintenance reserve", s.expenses.maintenance, TERM_HELP.maintenance],
+                ["Management", s.expenses.management, TERM_HELP.management],
+                ["Vacancy allowance", s.expenses.vacancy, TERM_HELP.vacancy],
+                ["Other (HOA/utilities)", s.expenses.other, null],
               ] as const
-            ).map(([name, amt]) => (
+            ).map(([name, amt, help]) => (
               <tr key={name} className="border-b border-zinc-100 dark:border-zinc-800">
-                <td className="py-1 text-zinc-600 dark:text-zinc-300">{name}</td>
+                <td className="py-1 text-zinc-600 dark:text-zinc-300">
+                  {name}
+                  {help && <InfoTip text={help} />}
+                </td>
                 <td className="py-1 text-right tabular-nums">{usd(amt)}</td>
               </tr>
             ))}
@@ -220,6 +392,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [autoFilled, setAutoFilled] = useState<string | null>(null);
 
   const [adv, setAdv] = useState({ ...DEFAULT_ASSUMPTIONS });
   const setA = <K extends keyof typeof adv>(k: K, v: (typeof adv)[K]) =>
@@ -306,9 +479,23 @@ export default function Home() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Analysis failed");
       setData(json);
-      // ATTOM knows the actual bedroom count — use it so the FMR row matches
-      const attomBeds = (json as AnalyzeResponse).attom?.beds;
-      if (attomBeds != null) setBedrooms(attomBeds);
+      // Auto-fill from real property data: listing (Mashvisor) wins, then
+      // ATTOM's records — the user can still edit either field.
+      const resp = json as AnalyzeResponse;
+      const listing = resp.mashvisor?.listing;
+      const bedsAuto = listing?.beds ?? resp.attom?.beds;
+      const priceAuto = listing?.listPrice;
+      if (bedsAuto != null) setBedrooms(bedsAuto);
+      if (priceAuto != null) setPrice(Math.round(priceAuto));
+      const filled = [
+        priceAuto != null ? "price" : null,
+        bedsAuto != null ? "bedrooms" : null,
+      ].filter(Boolean);
+      setAutoFilled(
+        filled.length
+          ? `${filled.join(" & ")} auto-filled — edit freely`
+          : null
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analysis failed");
     } finally {
@@ -456,6 +643,28 @@ export default function Home() {
             <span>
               {data.property.countyName}, {data.property.state}
             </span>
+            {data.mashvisor?.listing && (
+              <span>
+                Listing:{" "}
+                {data.mashvisor.listing.listPrice != null && (
+                  <b>{usd(data.mashvisor.listing.listPrice)}</b>
+                )}
+                {data.mashvisor.listing.beds != null && (
+                  <> · {data.mashvisor.listing.beds} bd</>
+                )}
+                {data.mashvisor.listing.baths != null && (
+                  <>/{data.mashvisor.listing.baths} ba</>
+                )}
+                {data.mashvisor.listing.sqft != null && (
+                  <> · {data.mashvisor.listing.sqft.toLocaleString()} sqft</>
+                )}
+              </span>
+            )}
+            {autoFilled && (
+              <span className="text-emerald-700 dark:text-emerald-400">
+                ✓ {autoFilled}
+              </span>
+            )}
             {data.attom?.beds != null && (
               <span>
                 {data.attom.beds} bd
@@ -519,6 +728,7 @@ export default function Home() {
                 ({data.fmr.areaName}){scenarios?.fmrRent != null && (
                   <>: <b>{usd(scenarios.fmrRent)}</b>/mo for {bedrooms} BR</>
                 )}
+                <InfoTip text="HUD Fair Market Rent — the 40th-percentile gross rent for this area (ZIP-level where available). It's the basis for Section 8 payment standards and our conservative market-rent estimate." />
               </span>
             )}
             <span>
@@ -583,9 +793,20 @@ export default function Home() {
               scenarios?.str ? "xl:grid-cols-3" : ""
             } gap-4`}
           >
-            {scenarios?.market && <ScenarioCard s={scenarios.market} />}
-            {scenarios?.s8 && <ScenarioCard s={scenarios.s8} />}
-            {scenarios?.str && <ScenarioCard s={scenarios.str} />}
+            {scenarios?.market && (
+              <ScenarioCard s={scenarios.market} units={adv.units} />
+            )}
+            {scenarios?.s8 && (
+              <ScenarioCard
+                s={scenarios.s8}
+                units={adv.units}
+                marketRentBenchmark={scenarios.market?.monthlyRent}
+                paymentStandardPct={adv.paymentStandardPct}
+              />
+            )}
+            {scenarios?.str && (
+              <ScenarioCard s={scenarios.str} units={adv.units} />
+            )}
           </div>
 
           {(data.mashvisor != null || data.mashvisorError != null) && (

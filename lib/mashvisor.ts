@@ -84,38 +84,81 @@ interface AddressParams {
 }
 
 /**
- * Analyze-time lookup: one call for the area's Airbnb performance around the
- * address. Returns null when no key is configured.
+ * Analyze-time lookups (two calls): the area's Airbnb performance and the
+ * property's listing facts (beds/baths/sqft/list price) for auto-filling
+ * the form. Returns null when no key is configured; each call fails
+ * independently so partial data still comes through.
  */
 export async function getMashvisorAnalyze(
   p: AddressParams
 ): Promise<MashvisorData | null> {
   if (!process.env.MASHVISOR_API_KEY) return null;
-  const c = await mvFetch("rento-calculator/lookup", {
-    state: p.state,
-    city: p.city,
-    zip_code: p.zip,
-    address: p.address,
-    lat: p.lat,
-    lng: p.lon,
-    beds: p.beds,
-    resource: "airbnb",
-  });
-  if (!c) return null;
-  const monthlyRevenue = num(c.adjusted_rental_income ?? c.median_rental_income);
-  // occupancy may arrive as 0-1 or 0-100
-  let occupancyPct = num(c.median_occupancy_rate);
-  if (occupancyPct !== undefined && occupancyPct <= 1) occupancyPct *= 100;
-  const str = {
-    monthlyRevenue,
-    occupancyPct,
-    nightlyRate: num(c.median_night_rate),
-    medianHomeValue: num(c.median_home_value),
-    marketLabel: c.market
-      ? [c.market.city, c.market.state].filter(Boolean).join(", ")
-      : undefined,
-  };
-  return str.monthlyRevenue || str.nightlyRate ? { str } : null;
+  const [strContent, propContent] = await Promise.all([
+    mvFetch("rento-calculator/lookup", {
+      state: p.state,
+      city: p.city,
+      zip_code: p.zip,
+      address: p.address,
+      lat: p.lat,
+      lng: p.lon,
+      beds: p.beds,
+      resource: "airbnb",
+    }).catch(() => null),
+    mvFetch("traditional-property", {
+      state: p.state,
+      city: p.city,
+      zip_code: p.zip,
+      address: p.address,
+    }).catch(() => null),
+  ]);
+
+  const out: MashvisorData = {};
+
+  if (strContent) {
+    const monthlyRevenue = num(
+      strContent.adjusted_rental_income ?? strContent.median_rental_income
+    );
+    // occupancy may arrive as 0-1 or 0-100
+    let occupancyPct = num(strContent.median_occupancy_rate);
+    if (occupancyPct !== undefined && occupancyPct <= 1) occupancyPct *= 100;
+    const str = {
+      monthlyRevenue,
+      occupancyPct,
+      nightlyRate: num(strContent.median_night_rate),
+      medianHomeValue: num(strContent.median_home_value),
+      marketLabel: strContent.market
+        ? [strContent.market.city, strContent.market.state]
+            .filter(Boolean)
+            .join(", ")
+        : undefined,
+    };
+    if (str.monthlyRevenue || str.nightlyRate) out.str = str;
+  }
+
+  if (propContent) {
+    // response may be the property object itself or nested under `property`
+    const prop = propContent.property ?? propContent;
+    // `price` is a SALE price only for sale listings — on rental records
+    // (status "rented"/"for rent") it's the monthly rent. Verified live:
+    // a Turbotenant rental came back with price=1200 (rent, not value).
+    const status = String(prop?.status ?? "").toLowerCase();
+    const isSaleListing = /active|sale|pending/.test(status);
+    const listing = {
+      beds: num(prop?.beds),
+      baths: num(prop?.baths),
+      sqft: num(prop?.sqft),
+      yearBuilt: num(prop?.year_built),
+      listPrice: isSaleListing
+        ? num(prop?.price ?? prop?.list_price)
+        : undefined,
+      propertyType: prop?.property_type ?? prop?.property_sub_type ?? undefined,
+    };
+    if (Object.values(listing).some((v) => v !== undefined)) {
+      out.listing = listing;
+    }
+  }
+
+  return out.str || out.listing ? out : null;
 }
 
 function parseHistorical(c: any): {

@@ -124,9 +124,14 @@ export default function BatchImport({
         const json = await res.json();
         if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
         const data = json as AnalyzeResponse;
-        const price = row.price ?? defaultPrice;
-        // CSV column wins; then ATTOM's actual bedroom count; then the form
-        const bedrooms = row.bedrooms ?? data.attom?.beds ?? defaultBedrooms;
+        // CSV column wins; then listing data; then ATTOM; then the form
+        const price =
+          row.price ?? data.mashvisor?.listing?.listPrice ?? defaultPrice;
+        const bedrooms =
+          row.bedrooms ??
+          data.mashvisor?.listing?.beds ??
+          data.attom?.beds ??
+          defaultBedrooms;
         const a: Assumptions = {
           ...assumptions,
           price,

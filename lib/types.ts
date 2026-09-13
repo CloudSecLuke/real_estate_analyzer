@@ -64,8 +64,19 @@ export interface StrData {
   marketLabel?: string; // e.g. "Cincinnati, OH"
 }
 
+// Listing facts for auto-filling the form (from traditional-property)
+export interface ListingInfo {
+  beds?: number;
+  baths?: number;
+  sqft?: number;
+  yearBuilt?: number;
+  listPrice?: number;
+  propertyType?: string;
+}
+
 export interface MashvisorData {
   str?: StrData;
+  listing?: ListingInfo;
 }
 
 export interface AnalyzeResponse {
