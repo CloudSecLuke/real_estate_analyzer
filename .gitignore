@@ -37,6 +37,9 @@ yarn-error.log*
 # personal research notes, not project code
 useful_links
 
+# machine-local agent settings
+.claude/settings.local.json
+
 # vercel
 .vercel
 

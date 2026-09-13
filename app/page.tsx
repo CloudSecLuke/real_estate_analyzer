@@ -185,11 +185,15 @@ function ScenarioCard({
   units = 1,
   marketRentBenchmark,
   paymentStandardPct,
+  cityLabel,
+  rentSource,
 }: {
   s: ScenarioResult;
   units?: number;
   marketRentBenchmark?: number;
   paymentStandardPct?: number;
+  cityLabel?: string | null;
+  rentSource?: "override" | "rent AVM" | "FMR" | null;
 }) {
   const positive = s.monthlyCashFlow > 0;
   const almost = s.ratingDetail.almost;
@@ -198,6 +202,7 @@ function ScenarioCard({
     isS8 &&
     marketRentBenchmark != null &&
     s.monthlyRent > marketRentBenchmark * 1.05;
+  const pha = cityLabel ? `the ${cityLabel} housing authority` : "the local housing authority";
   return (
     <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
@@ -253,8 +258,30 @@ function ScenarioCard({
           market rent of {usd(marketRentBenchmark!)}/mo. Housing authorities
           run a &ldquo;rent reasonableness&rdquo; check and won&apos;t approve
           rent above comparable unassisted units, so the achievable Section 8
-          rent is likely closer to the market figure. Re-run with a lower
-          payment standard % to see the conservative case.
+          rent is likely closer to the market figure.{" "}
+          <b>
+            Call {pha} to ask what they&apos;d approve for this specific unit
+          </b>{" "}
+          (
+          <a
+            href="https://www.hud.gov/program_offices/public_indian_housing/pha/contacts"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            HUD PHA directory
+          </a>
+          ), or re-run with a lower payment standard % for the conservative
+          case.
+        </div>
+      )}
+
+      {!isS8 && rentSource === "FMR" && (
+        <div className="rounded-md bg-zinc-50 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400 px-3 py-2 text-xs">
+          Rent here is the <b>area-wide HUD FMR</b>, not an estimate for this
+          specific property. In cheaper submarkets actual rent often runs well
+          below FMR (and above it in hot pockets) — verify with local comps or
+          a property manager before trusting this number.
         </div>
       )}
 
@@ -339,8 +366,17 @@ function ScenarioCard({
               above comparable unassisted units nearby (&ldquo;rent
               reasonableness&rdquo;). In soft markets FMR can sit far above
               real market rent, making this card look better than what the PHA
-              will actually approve. Call the local PHA with a specific unit
-              before relying on FMR × payment standard.
+              will actually approve. Call {pha} with this specific unit before
+              relying on FMR × payment standard —{" "}
+              <a
+                href="https://www.hud.gov/program_offices/public_indian_housing/pha/contacts"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                find their contact in HUD&apos;s PHA directory
+              </a>
+              .
             </p>
           </div>
         </details>
@@ -502,6 +538,14 @@ export default function Home() {
       setLoading(false);
     }
   }
+
+  // "312 WALNUT ST, CINCINNATI, OH, 45202" → "Cincinnati" for PHA guidance
+  const cityLabel = useMemo(() => {
+    const city = data?.property.matchedAddress.split(",")[1]?.trim() ?? "";
+    return city
+      ? city.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+      : null;
+  }, [data]);
 
   const scenarios = useMemo(() => {
     if (!data || price === "" || bedrooms === "") return null;
@@ -794,7 +838,11 @@ export default function Home() {
             } gap-4`}
           >
             {scenarios?.market && (
-              <ScenarioCard s={scenarios.market} units={adv.units} />
+              <ScenarioCard
+                s={scenarios.market}
+                units={adv.units}
+                rentSource={scenarios.marketRentSource}
+              />
             )}
             {scenarios?.s8 && (
               <ScenarioCard
@@ -802,6 +850,7 @@ export default function Home() {
                 units={adv.units}
                 marketRentBenchmark={scenarios.market?.monthlyRent}
                 paymentStandardPct={adv.paymentStandardPct}
+                cityLabel={cityLabel}
               />
             )}
             {scenarios?.str && (
