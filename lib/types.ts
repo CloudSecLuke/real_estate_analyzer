@@ -86,6 +86,18 @@ export interface AcsRentData {
   acsYear: number;
   inflationFactor: number;
   source: string;
+  rentalVacancyPct?: number; // county rental vacancy rate (ACS DP04)
+}
+
+// County trajectory — the "is this market melting?" panel
+export interface MarketHealth {
+  countyName: string;
+  population?: number;
+  populationChangePct5yr?: number;
+  medianValue?: number;
+  valueChangePct5yr?: number;
+  unemploymentPct?: number;
+  unemploymentAsOf?: string; // e.g. "Jul 2026 (preliminary)"
 }
 
 export interface AnalyzeResponse {
@@ -95,6 +107,7 @@ export interface AnalyzeResponse {
   flood: FloodData;
   tax: TaxEstimate;
   acsRent?: AcsRentData | null;
+  marketHealth?: MarketHealth | null;
   attom?: AttomData | null;
   attomError?: string;
   mashvisor?: MashvisorData | null;
@@ -125,6 +138,13 @@ export interface Assumptions {
   // short-term rental (Airbnb) scenario — occupancy is baked into revenue
   strManagementPct: number; // % of revenue; STR co-hosting runs 20-30%
   strOtherMonthlyExpense: number; // utilities/supplies/wifi owner pays on STR
+  // dollar floors — %-of-value expenses flatter cheap houses (0.5% of a
+  // $60k house is $25/mo of insurance; real quotes run $60-100/mo)
+  insuranceFloorMonthly: number;
+  maintenanceFloorMonthly: number;
+  // 5-year hold projection
+  appreciationPctAnnual: number;
+  sellingCostPct: number; // agent + closing on exit
 }
 
 // Which scenario a pin/map view is keyed to

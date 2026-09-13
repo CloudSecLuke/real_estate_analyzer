@@ -23,20 +23,35 @@ export async function getCountyMedianRent(
   const key = process.env.CENSUS_API_KEY;
   if (!key || !/^\d{5}$/.test(countyFips)) return null;
 
-  const params = new URLSearchParams({
-    // B25031_002E..006E: median gross rent for 0,1,2,3,4-bedroom units
-    get: "B25031_002E,B25031_003E,B25031_004E,B25031_005E,B25031_006E",
+  const geo = {
     for: `county:${countyFips.slice(2)}`,
     in: `state:${countyFips.slice(0, 2)}`,
     key,
+  };
+  const params = new URLSearchParams({
+    // B25031_002E..006E: median gross rent for 0,1,2,3,4-bedroom units
+    get: "B25031_002E,B25031_003E,B25031_004E,B25031_005E,B25031_006E",
+    ...geo,
   });
-  const res = await fetch(`${ACS_URL}?${params}`, {
-    next: { revalidate: 2592000 },
-  });
+  // DP04_0005E: the county's actual rental vacancy rate
+  const vacancyParams = new URLSearchParams({ get: "DP04_0005E", ...geo });
+  const [res, vacancyRes] = await Promise.all([
+    fetch(`${ACS_URL}?${params}`, { next: { revalidate: 2592000 } }),
+    fetch(`${ACS_URL}/profile?${vacancyParams}`, {
+      next: { revalidate: 2592000 },
+    }).catch(() => null),
+  ]);
   if (!res.ok) return null;
   const json = await res.json().catch(() => null);
   const row: unknown[] | undefined = json?.[1];
   if (!row) return null;
+
+  let rentalVacancyPct: number | undefined;
+  if (vacancyRes?.ok) {
+    const vjson = await vacancyRes.json().catch(() => null);
+    const v = Number(vjson?.[1]?.[0]);
+    if (Number.isFinite(v) && v >= 0 && v < 50) rentalVacancyPct = v;
+  }
 
   const byBedroom: AcsRentData["byBedroom"] = {};
   ([0, 1, 2, 3, 4] as const).forEach((bed, i) => {
@@ -53,5 +68,6 @@ export async function getCountyMedianRent(
     acsYear: ACS_YEAR,
     inflationFactor: INFLATION_TO_CURRENT,
     source: `${countyName} median gross rent by bedrooms (Census ACS ${ACS_YEAR}, inflated ×${INFLATION_TO_CURRENT})`,
+    rentalVacancyPct,
   };
 }

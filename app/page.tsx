@@ -5,9 +5,11 @@ import dynamic from "next/dynamic";
 import {
   DEFAULT_ASSUMPTIONS,
   formatGaps,
+  projectFiveYears,
   RATING_COLORS,
   TIERS,
 } from "@/lib/metrics";
+import { stressTest } from "@/lib/scenarios";
 import InfoTip from "@/components/InfoTip";
 import { buildPin, computeScenariosFromData } from "@/lib/scenarios";
 import BatchImport from "@/components/BatchImport";
@@ -450,6 +452,9 @@ export default function Home() {
   const [pinsLoaded, setPinsLoaded] = useState(false);
   const [user, setUser] = useState<string | null>(null);
   const [persistent, setPersistent] = useState(false);
+  const [liveRate, setLiveRate] = useState<{ pct: number; asOf: string } | null>(
+    null
+  );
   const [colorBy, setColorBy] = useState<ScenarioKey>("market");
   const [ratingFilter, setRatingFilter] = useState<Set<Rating>>(
     new Set(ALL_RATINGS)
@@ -487,6 +492,22 @@ export default function Home() {
       }
       setSavedPins(pins);
       setPinsLoaded(true);
+
+      // Current 30-yr average (Freddie Mac via FRED) replaces the stale
+      // hardcoded default — but never a rate the user set themselves.
+      try {
+        const r = await fetch("/api/rates").then((res) => res.json());
+        if (r?.rate?.pct) {
+          setLiveRate(r.rate);
+          setAdv((p) =>
+            p.interestRatePct === DEFAULT_ASSUMPTIONS.interestRatePct
+              ? { ...p, interestRatePct: r.rate.pct }
+              : p
+          );
+        }
+      } catch {
+        // keep the default
+      }
     })();
   }, []);
 
@@ -533,9 +554,18 @@ export default function Home() {
       const priceAuto = listing?.listPrice;
       if (bedsAuto != null) setBedrooms(bedsAuto);
       if (priceAuto != null) setPrice(Math.round(priceAuto));
+      // county's real rental vacancy replaces the 5% guess (edit freely)
+      const vacancyAuto = resp.acsRent?.rentalVacancyPct;
+      if (vacancyAuto != null) {
+        setAdv((p) => ({
+          ...p,
+          vacancyPctMarket: Math.round(vacancyAuto * 10) / 10,
+        }));
+      }
       const filled = [
         priceAuto != null ? "price" : null,
         bedsAuto != null ? "bedrooms" : null,
+        vacancyAuto != null ? `vacancy (county actual ${vacancyAuto}%)` : null,
       ].filter(Boolean);
       setAutoFilled(
         filled.length
@@ -566,6 +596,21 @@ export default function Home() {
     };
     return computeScenariosFromData(data, a);
   }, [data, price, bedrooms, adv]);
+
+  const outlook = useMemo(() => {
+    if (!data || !scenarios || price === "" || bedrooms === "") return null;
+    const a: Assumptions = {
+      ...adv,
+      price: Number(price),
+      bedrooms: Number(bedrooms),
+    };
+    return {
+      stress: stressTest(data, a, scenarios),
+      projection: scenarios.market
+        ? projectFiveYears(scenarios.market, a)
+        : null,
+    };
+  }, [data, scenarios, price, bedrooms, adv]);
 
   // Auto-save/update the analyzed property as a map pin; assumption tweaks
   // live-update its snapshot.
@@ -644,13 +689,21 @@ export default function Home() {
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowAdvanced((s) => !s)}
-          className="self-start text-sm text-emerald-700 dark:text-emerald-400"
-        >
-          {showAdvanced ? "▾ Hide" : "▸ Show"} financing & expense assumptions
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((s) => !s)}
+            className="text-sm text-emerald-700 dark:text-emerald-400"
+          >
+            {showAdvanced ? "▾ Hide" : "▸ Show"} financing & expense assumptions
+          </button>
+          {liveRate && (
+            <span className="text-xs text-zinc-400">
+              rate default: {liveRate.pct}% — current 30-yr avg (Freddie Mac,{" "}
+              {liveRate.asOf})
+            </span>
+          )}
+        </div>
 
         {showAdvanced && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -671,6 +724,10 @@ export default function Home() {
             <NumInput label="Units" value={adv.units} onChange={(v) => setA("units", v === "" ? 1 : v)} />
             <NumInput label="STR management" suffix="% rev" value={adv.strManagementPct} onChange={(v) => setA("strManagementPct", v === "" ? 20 : v)} step={5} />
             <NumInput label="STR extra costs" suffix="$/mo" value={adv.strOtherMonthlyExpense} onChange={(v) => setA("strOtherMonthlyExpense", v === "" ? 250 : v)} step={25} />
+            <NumInput label="Insurance floor" suffix="$/mo" value={adv.insuranceFloorMonthly} onChange={(v) => setA("insuranceFloorMonthly", v === "" ? 0 : v)} step={5} />
+            <NumInput label="Maintenance floor" suffix="$/mo" value={adv.maintenanceFloorMonthly} onChange={(v) => setA("maintenanceFloorMonthly", v === "" ? 0 : v)} step={10} />
+            <NumInput label="Appreciation" suffix="%/yr" value={adv.appreciationPctAnnual} onChange={(v) => setA("appreciationPctAnnual", v === "" ? 3 : v)} step={0.5} />
+            <NumInput label="Selling costs" suffix="%" value={adv.sellingCostPct} onChange={(v) => setA("sellingCostPct", v === "" ? 7 : v)} step={0.5} />
           </div>
         )}
       </form>
@@ -814,6 +871,64 @@ export default function Home() {
             </span>
           </div>
 
+          {data.marketHealth && (
+            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-1">
+              <span className="font-semibold">
+                Market health ({data.marketHealth.countyName})
+                <InfoTip text="County trajectory: 5-year change from Census ACS plus BLS unemployment. Shrinking population is the classic risk hiding behind cheap, high-cash-flow markets — rents and values erode and vacancies stretch." />
+              </span>
+              {data.marketHealth.populationChangePct5yr != null && (
+                <span
+                  className={
+                    data.marketHealth.populationChangePct5yr < 0
+                      ? "text-red-600 dark:text-red-400"
+                      : ""
+                  }
+                >
+                  Population{" "}
+                  <b>
+                    {data.marketHealth.populationChangePct5yr >= 0 ? "+" : ""}
+                    {data.marketHealth.populationChangePct5yr.toFixed(1)}%
+                  </b>{" "}
+                  (5 yr
+                  {data.marketHealth.population != null &&
+                    `, now ${data.marketHealth.population.toLocaleString()}`}
+                  )
+                </span>
+              )}
+              {data.marketHealth.valueChangePct5yr != null && (
+                <span>
+                  Median value{" "}
+                  <b>
+                    {data.marketHealth.valueChangePct5yr >= 0 ? "+" : ""}
+                    {data.marketHealth.valueChangePct5yr.toFixed(0)}%
+                  </b>{" "}
+                  (5 yr
+                  {data.marketHealth.medianValue != null &&
+                    `, now ${usd(data.marketHealth.medianValue)}`}
+                  )
+                </span>
+              )}
+              {data.marketHealth.unemploymentPct != null && (
+                <span
+                  className={
+                    data.marketHealth.unemploymentPct >= 7
+                      ? "text-red-600 dark:text-red-400"
+                      : ""
+                  }
+                >
+                  Unemployment <b>{data.marketHealth.unemploymentPct.toFixed(1)}%</b>
+                  {data.marketHealth.unemploymentAsOf && (
+                    <span className="text-zinc-500">
+                      {" "}
+                      ({data.marketHealth.unemploymentAsOf})
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
+          )}
+
           {data.fmrError && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 text-amber-800 dark:text-amber-300 px-4 py-3 text-sm">
               HUD data unavailable: {data.fmrError} You can still analyze with a
@@ -879,6 +994,105 @@ export default function Home() {
               <ScenarioCard s={scenarios.str} units={adv.units} />
             )}
           </div>
+
+          {outlook && (outlook.stress || outlook.projection) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {outlook.stress && (
+                <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 flex flex-col gap-3">
+                  <h3 className="font-semibold text-lg">
+                    Stress test
+                    <InfoTip text="Recomputes the market scenario with estimates moved against you. A deal that only works when every estimate is exactly right isn't a deal — look for cash flow that survives the 'all three' row." />
+                  </h3>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {outlook.stress.map((row) => (
+                        <tr
+                          key={row.label}
+                          className="border-b border-zinc-100 dark:border-zinc-800"
+                        >
+                          <td className="py-1.5 text-zinc-600 dark:text-zinc-300">
+                            {row.label}
+                          </td>
+                          <td
+                            className={`py-1.5 text-right tabular-nums font-semibold ${
+                              row.monthlyCashFlow > 0
+                                ? "text-emerald-600"
+                                : "text-red-600"
+                            }`}
+                          >
+                            {usd(row.monthlyCashFlow)}/mo
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="text-xs text-zinc-400">
+                    Market scenario. Rent −10%, vacancy +5 points, rate +1
+                    point — each alone, then combined.
+                  </p>
+                </div>
+              )}
+              {outlook.projection && (
+                <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 flex flex-col gap-3">
+                  <h3 className="font-semibold text-lg">
+                    5-year hold projection
+                    <InfoTip text="Total return, not just monthly cash flow: appreciation at your assumed rate, loan principal paid down by the tenant, and cumulative cash flow (held flat — no rent growth assumed), minus selling costs on exit." />
+                  </h3>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {(
+                        [
+                          [
+                            `Est. value in 5 yrs (${adv.appreciationPctAnnual}%/yr)`,
+                            usd(outlook.projection.futureValue),
+                          ],
+                          ["Loan balance then", usd(outlook.projection.loanBalance)],
+                          [
+                            "Principal paid down by tenant",
+                            usd(outlook.projection.equityPaydown),
+                          ],
+                          [
+                            "Cumulative cash flow (60 mo)",
+                            usd(outlook.projection.cumulativeCashFlow),
+                          ],
+                          [
+                            `Net if sold (${adv.sellingCostPct}% selling costs)`,
+                            usd(outlook.projection.netIfSold),
+                          ],
+                          ["Total profit vs cash in", usd(outlook.projection.totalProfit)],
+                        ] as const
+                      ).map(([label, value]) => (
+                        <tr
+                          key={label}
+                          className="border-b border-zinc-100 dark:border-zinc-800"
+                        >
+                          <td className="py-1.5 text-zinc-600 dark:text-zinc-300">
+                            {label}
+                          </td>
+                          <td className="py-1.5 text-right tabular-nums">{value}</td>
+                        </tr>
+                      ))}
+                      <tr className="font-semibold">
+                        <td className="py-1.5">
+                          Annualized total return
+                          <InfoTip text="The compound annual growth rate on your invested cash if the 5-year projection plays out: (sale proceeds + all cash flow) relative to cash invested, annualized." />
+                        </td>
+                        <td
+                          className={`py-1.5 text-right tabular-nums ${
+                            outlook.projection.annualizedReturnPct > 0
+                              ? "text-emerald-600"
+                              : "text-red-600"
+                          }`}
+                        >
+                          {outlook.projection.annualizedReturnPct.toFixed(1)}%/yr
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           {(data.mashvisor != null || data.mashvisorError != null) && (
             <MashvisorCompare

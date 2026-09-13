@@ -145,6 +145,46 @@ export function computeScenariosFromData(
   };
 }
 
+export interface StressRow {
+  label: string;
+  monthlyCashFlow: number;
+}
+
+/**
+ * Stress-test the market scenario: what happens to monthly cash flow if
+ * rent, vacancy, or the interest rate move against you — separately and
+ * all at once. A deal that only works when every estimate is right isn't
+ * a deal.
+ */
+export function stressTest(
+  data: AnalyzeResponse,
+  a: Assumptions,
+  base: ScenarioSet
+): StressRow[] | null {
+  const m = base.market;
+  if (!m) return null;
+  const variant = (label: string, a2: Assumptions): StressRow => {
+    const s = computeScenariosFromData(data, a2).market;
+    return { label, monthlyCashFlow: s ? s.monthlyCashFlow : 0 };
+  };
+  const rentDown = Math.round(m.monthlyRent * 0.9);
+  return [
+    { label: "As analyzed", monthlyCashFlow: m.monthlyCashFlow },
+    variant("Rent −10%", { ...a, marketRentOverride: rentDown }),
+    variant("Vacancy +5 pts", {
+      ...a,
+      vacancyPctMarket: a.vacancyPctMarket + 5,
+    }),
+    variant("Rate +1 pt", { ...a, interestRatePct: a.interestRatePct + 1 }),
+    variant("All three at once", {
+      ...a,
+      marketRentOverride: rentDown,
+      vacancyPctMarket: a.vacancyPctMarket + 5,
+      interestRatePct: a.interestRatePct + 1,
+    }),
+  ];
+}
+
 export function toPinMetrics(s: ScenarioResult): PinMetrics {
   return {
     monthlyCashFlow: Math.round(s.monthlyCashFlow),

@@ -4,6 +4,7 @@ import { getFmr } from "@/lib/hud";
 import { getFloodZone } from "@/lib/fema";
 import { estimateTaxRateForCounty } from "@/lib/tax";
 import { getCountyMedianRent } from "@/lib/acs";
+import { getMarketHealth } from "@/lib/market";
 import { getAttomData } from "@/lib/attom";
 import { getMashvisorAnalyze } from "@/lib/mashvisor";
 import type {
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
     let attomError: string | undefined;
     let mashvisor: MashvisorData | null = null;
     let mashvisorError: string | undefined;
-    const [fmrResult, flood, attomResult, acsRent, tax, mashvisorResult] = await Promise.all([
+    const [fmrResult, flood, attomResult, acsRent, tax, mashvisorResult, marketHealth] = await Promise.all([
       getFmr(property.countyFips, property.zip).catch((e: Error) => e),
       getFloodZone(property.lat, property.lon),
       getAttomData(property.matchedAddress).catch((e: Error) => e),
@@ -59,6 +60,9 @@ export async function POST(req: NextRequest) {
         lat: property.lat,
         lon: property.lon,
       }).catch((e: Error) => e),
+      getMarketHealth(property.countyFips, property.countyName).catch(
+        () => null
+      ),
     ]);
     if (fmrResult instanceof Error) {
       fmrError = fmrResult.message;
@@ -83,6 +87,7 @@ export async function POST(req: NextRequest) {
       flood,
       tax,
       acsRent,
+      marketHealth,
       attom,
       attomError,
       mashvisor,

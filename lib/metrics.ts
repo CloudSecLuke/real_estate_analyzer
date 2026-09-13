@@ -25,6 +25,10 @@ export const DEFAULT_ASSUMPTIONS: Omit<Assumptions, "price" | "bedrooms"> = {
   otherMonthlyExpense: 0,
   strManagementPct: 20, // STR co-hosting typically runs 20-30%
   strOtherMonthlyExpense: 250, // owner-paid utilities/wifi/supplies on STR
+  insuranceFloorMonthly: 65, // old Midwest SFR quotes don't scale with price
+  maintenanceFloorMonthly: 110, // a 1920s roof costs the same on a $60k house
+  appreciationPctAnnual: 3,
+  sellingCostPct: 7, // agent commission + seller closing on exit
 };
 
 export function monthlyMortgagePayment(
@@ -127,9 +131,16 @@ export function computeScenario(
   const grossMonthly = monthlyRent + a.otherMonthlyIncome;
 
   const taxes = (price * effectiveTaxRate) / 12;
+  // dollar floors: %-of-value expenses understate cheap houses badly
   const insurance =
-    (price * (a.insurancePctOfValue / 100) * insuranceMultiplier) / 12;
-  const maintenance = (price * (a.maintenancePctOfValue / 100)) / 12;
+    Math.max(
+      (price * (a.insurancePctOfValue / 100)) / 12,
+      a.insuranceFloorMonthly ?? 0
+    ) * insuranceMultiplier;
+  const maintenance = Math.max(
+    (price * (a.maintenancePctOfValue / 100)) / 12,
+    a.maintenanceFloorMonthly ?? 0
+  );
   const management = grossMonthly * (a.managementPct / 100);
   const vacancy = grossMonthly * (vacancyPct / 100);
   const other = a.otherMonthlyExpense;
@@ -202,6 +213,63 @@ export function section8Rent(
   paymentStandardPct: number
 ): number {
   return Math.round(fmrForBedrooms * (paymentStandardPct / 100));
+}
+
+export interface FiveYearProjection {
+  futureValue: number;
+  loanBalance: number;
+  equityPaydown: number; // principal paid off in 60 months
+  cumulativeCashFlow: number;
+  saleCosts: number;
+  netIfSold: number; // future value − sale costs − loan balance
+  totalProfit: number; // netIfSold + cumulative CF − cash invested
+  annualizedReturnPct: number; // total-return CAGR on cash invested
+}
+
+/**
+ * Simple 5-year hold: appreciation at the assumed annual rate, loan
+ * amortization over 60 payments, cash flow held flat (conservative — no
+ * rent growth), sale costs on exit.
+ */
+export function projectFiveYears(
+  s: ScenarioResult,
+  a: Assumptions
+): FiveYearProjection | null {
+  if (a.price <= 0 || s.cashInvested <= 0) return null;
+  const years = 5;
+  const k = years * 12;
+  const appreciation = (a.appreciationPctAnnual ?? 3) / 100;
+  const futureValue = a.price * Math.pow(1 + appreciation, years);
+
+  const loan0 = a.price * (1 - a.downPaymentPct / 100);
+  const r = a.interestRatePct / 100 / 12;
+  const n = a.loanTermYears * 12;
+  const loanBalance =
+    loan0 <= 0
+      ? 0
+      : r === 0
+        ? loan0 * Math.max(0, 1 - k / n)
+        : (loan0 * (Math.pow(1 + r, n) - Math.pow(1 + r, Math.min(k, n)))) /
+          (Math.pow(1 + r, n) - 1);
+
+  const cumulativeCashFlow = s.monthlyCashFlow * k;
+  const saleCosts = futureValue * ((a.sellingCostPct ?? 7) / 100);
+  const netIfSold = futureValue - saleCosts - loanBalance;
+  const totalProfit = netIfSold + cumulativeCashFlow - s.cashInvested;
+  const multiple = (netIfSold + cumulativeCashFlow) / s.cashInvested;
+  const annualizedReturnPct =
+    multiple > 0 ? (Math.pow(multiple, 1 / years) - 1) * 100 : -100;
+
+  return {
+    futureValue,
+    loanBalance,
+    equityPaydown: loan0 - loanBalance,
+    cumulativeCashFlow,
+    saleCosts,
+    netIfSold,
+    totalProfit,
+    annualizedReturnPct,
+  };
 }
 
 export const RATING_COLORS: Record<Rating, string> = {
