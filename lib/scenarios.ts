@@ -171,7 +171,7 @@ export function stressTest(
   return [
     { label: "As analyzed", monthlyCashFlow: m.monthlyCashFlow },
     variant("Rent −10%", { ...a, marketRentOverride: rentDown }),
-    variant("Vacancy +5 pts", {
+    variant("Empty months +5 pts", {
       ...a,
       vacancyPctMarket: a.vacancyPctMarket + 5,
     }),

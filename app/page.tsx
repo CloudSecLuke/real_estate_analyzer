@@ -1,19 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   DEFAULT_ASSUMPTIONS,
-  formatGaps,
   projectFiveYears,
   RATING_COLORS,
   TIERS,
 } from "@/lib/metrics";
-import { stressTest } from "@/lib/scenarios";
+import { computeScenariosFromData, buildPin, stressTest } from "@/lib/scenarios";
+import {
+  bandNote,
+  buildVerdict,
+  DISPLAY_LABEL,
+  ladderEyebrow,
+  MARKET_SRC_LABEL,
+  rankScenarios,
+  signedUsd,
+  usdWhole,
+  pct1,
+  type RankedScenario,
+} from "@/lib/verdict";
+import AssumptionsSidebar, {
+  type SourceStatus,
+} from "@/components/AssumptionsSidebar";
+import FidelityCheck from "@/components/FidelityCheck";
 import InfoTip from "@/components/InfoTip";
-import { buildPin, computeScenariosFromData } from "@/lib/scenarios";
-import BatchImport from "@/components/BatchImport";
-import MashvisorCompare from "@/components/MashvisorCompare";
 import type {
   AnalyzeResponse,
   Assumptions,
@@ -28,39 +40,15 @@ import type {
 const PropertyMap = dynamic(() => import("@/components/PropertyMap"), {
   ssr: false,
   loading: () => (
-    <div className="h-[440px] w-full rounded-xl border border-zinc-200 dark:border-zinc-800 animate-pulse bg-zinc-100 dark:bg-zinc-900" />
+    <div className="h-[400px] w-full animate-pulse border border-input-border bg-sidebar" />
   ),
 });
 
 const ALL_RATINGS: Rating[] = ["Rare", "Fantastic", "Great", "Good", "Poor"];
 const PINS_KEY = "rea_saved_pins_v1";
+const SAMPLE = { address: "1418 Vine St, Cincinnati, OH 45202", price: 118000, beds: 3 };
 
-function RatingBadge({
-  rating,
-  almost,
-}: {
-  rating: Rating;
-  almost: Rating | null;
-}) {
-  return (
-    <span className="inline-flex items-center gap-1">
-      <span
-        className="rounded-full px-2 py-0.5 text-xs font-semibold text-white"
-        style={{ backgroundColor: RATING_COLORS[rating] }}
-      >
-        {rating}
-      </span>
-      {almost && (
-        <span
-          className="rounded-full px-2 py-0.5 text-xs font-semibold border border-dashed"
-          style={{ borderColor: RATING_COLORS[almost], color: RATING_COLORS[almost] }}
-        >
-          Almost {almost}
-        </span>
-      )}
-    </span>
-  );
-}
+type Phase = "empty" | "loading" | "results";
 
 const usd = (n: number, digits = 0) =>
   n.toLocaleString("en-US", {
@@ -70,74 +58,93 @@ const usd = (n: number, digits = 0) =>
     minimumFractionDigits: digits,
   });
 
-function NumInput({
-  label,
-  value,
-  onChange,
-  step = 1,
-  suffix,
-  placeholder,
-}: {
-  label: string;
-  value: number | "";
-  onChange: (v: number | "") => void;
-  step?: number;
-  suffix?: string;
-  placeholder?: string;
-}) {
+const cfClass = (n: number) => (n > 0 ? "text-positive" : "text-negative");
+
+function RatingBadge({ rating, small }: { rating: Rating; small?: boolean }) {
   return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="text-zinc-500 dark:text-zinc-400">{label}</span>
-      <div className="flex items-center gap-1">
-        <input
-          type="number"
-          step={step}
-          value={value}
-          placeholder={placeholder}
-          onChange={(e) =>
-            onChange(e.target.value === "" ? "" : Number(e.target.value))
-          }
-          className="w-full rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5"
-        />
-        {suffix && <span className="text-zinc-400 text-xs">{suffix}</span>}
-      </div>
-    </label>
+    <span
+      className={`rounded-[2px] font-semibold uppercase text-field ${
+        small
+          ? "px-[7px] py-[2px] text-[10px] tracking-[.06em]"
+          : "px-[9px] py-[3px] text-[10.5px] tracking-[.08em]"
+      }`}
+      style={{ backgroundColor: RATING_COLORS[rating] }}
+    >
+      {rating}
+    </span>
   );
 }
 
-const TERM_HELP = {
-  cashFlow:
-    "What's left in your pocket each month after every expense AND the mortgage payment. Positive = the property pays you monthly.",
-  rent: "The monthly rent this scenario assumes. Market uses the best available estimate (your override, rent AVM, or HUD FMR); Section 8 uses FMR × payment standard; Airbnb uses occupancy-adjusted revenue.",
-  coc: "Cash-on-cash return: annual cash flow ÷ the actual cash you put in (down payment + closing costs + rehab). Think of it as the interest rate your invested cash earns.",
-  cap: "Capitalization rate: net operating income ÷ purchase price. The return if you'd paid all cash — ignores the mortgage, so you can compare properties regardless of financing.",
-  grm: "Gross Rent Multiplier: price ÷ one year of rent. How many years of gross rent it takes to pay back the price — lower means you're buying rent cheaper.",
-  noi: "Net Operating Income: yearly income minus operating expenses (taxes, insurance, maintenance, management, vacancy) — before any mortgage payment.",
-  cashInvested:
-    "Total cash out of pocket to do the deal: down payment + closing costs + rehab budget. NOT the mortgage. This is the denominator of cash-on-cash ROI.",
-  pi: "Principal & Interest — the monthly loan payment. Taxes and insurance are itemized separately here rather than escrowed into the payment.",
-  maintenance:
-    "Monthly reserve set aside for repairs and eventual big-ticket items (roof, HVAC). Default is 1% of the property value per year.",
-  vacancy:
-    "Expected rent lost while the unit sits empty between tenants, as a % of rent.",
-  management:
-    "Property manager's cut of collected rent. Set it to 0 under advanced assumptions if you self-manage.",
-} as const;
+function AlmostChip({ almost }: { almost: Rating }) {
+  return (
+    <span
+      className="rounded-[2px] border border-dashed px-[7px] py-[2px] text-[10.5px] font-medium"
+      style={{ borderColor: RATING_COLORS[almost], color: RATING_COLORS[almost] }}
+    >
+      Almost {almost}
+    </span>
+  );
+}
+
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-accent">
+      {children}
+    </span>
+  );
+}
+
+function SectionHead({
+  title,
+  caption,
+  right,
+}: {
+  title: string;
+  caption?: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-1 flex flex-wrap items-baseline justify-between gap-3 border-b-2 border-ink pb-2">
+      <h3 className="font-serif text-[21px] font-medium">{title}</h3>
+      {caption && <span className="text-[11.5px] text-label">{caption}</span>}
+      {right}
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  tip,
+}: {
+  label: string;
+  value: string;
+  tip: string;
+}) {
+  return (
+    <div className="flex flex-col gap-[2px]">
+      <span className="flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-[.07em] text-label">
+        {label}
+        <InfoTip text={tip} />
+      </span>
+      <span className="text-[14.5px] font-medium text-ink">{value}</span>
+    </div>
+  );
+}
 
 function WhyRating({ s, units }: { s: ScenarioResult; units: number }) {
   const cfPerUnit = s.monthlyCashFlow / Math.max(1, units);
-  // For Poor, judge against the lowest tier so the misses are visible
   const tier = TIERS.find((t) => t.rating === s.rating) ?? TIERS[TIERS.length - 1];
   const rows = [
     {
       label: `Cash flow${units > 1 ? " per unit" : ""}`,
-      value: `${usd(cfPerUnit)}/mo`,
-      req: `${tier.cfExclusive ? ">" : "≥"} ${usd(tier.cf)}/mo`,
+      value: `${usdWhole(cfPerUnit)}/mo`,
+      req: `${tier.cfExclusive ? ">" : "≥"} ${usdWhole(tier.cf)}/mo`,
       pass: tier.cfExclusive ? cfPerUnit > tier.cf : cfPerUnit >= tier.cf,
     },
     {
       label: "Cash-on-cash",
-      value: `${s.cashOnCashPct.toFixed(1)}%`,
+      value: pct1(s.cashOnCashPct),
       req: `≥ ${tier.coc}%`,
       pass: s.cashOnCashPct >= tier.coc,
     },
@@ -145,7 +152,7 @@ function WhyRating({ s, units }: { s: ScenarioResult; units: number }) {
       ? [
           {
             label: "Cap rate",
-            value: `${s.capRatePct.toFixed(1)}%`,
+            value: pct1(s.capRatePct),
             req: `≥ ${tier.cap}%`,
             pass: s.capRatePct >= tier.cap,
           },
@@ -153,11 +160,9 @@ function WhyRating({ s, units }: { s: ScenarioResult; units: number }) {
       : []),
   ];
   return (
-    <details className="text-sm">
-      <summary className="cursor-pointer text-zinc-500 dark:text-zinc-400">
-        Why {s.rating}?
-      </summary>
-      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+    <details className="mt-2 text-[12.5px]">
+      <summary className="cursor-pointer text-label">Why {s.rating}?</summary>
+      <p className="mt-1 text-[11.5px] text-label">
         {s.rating === "Poor"
           ? "Fails the minimum (Good) thresholds:"
           : `Meets every ${s.rating}-tier threshold${
@@ -167,11 +172,11 @@ function WhyRating({ s, units }: { s: ScenarioResult; units: number }) {
       <table className="mt-1 w-full">
         <tbody>
           {rows.map((r) => (
-            <tr key={r.label} className="border-b border-zinc-100 dark:border-zinc-800">
-              <td className="py-1 text-zinc-600 dark:text-zinc-300">{r.label}</td>
+            <tr key={r.label} className="border-b border-rule-light">
+              <td className="py-1 text-[#4a423a]">{r.label}</td>
               <td className="py-1 text-right tabular-nums">{r.value}</td>
-              <td className="py-1 text-right text-zinc-500 w-24">{r.req}</td>
-              <td className={`py-1 text-right w-6 ${r.pass ? "text-emerald-600" : "text-red-600"}`}>
+              <td className="w-20 py-1 text-right text-label">{r.req}</td>
+              <td className={`w-5 py-1 text-right ${r.pass ? "text-positive" : "text-negative"}`}>
                 {r.pass ? "✓" : "✗"}
               </td>
             </tr>
@@ -182,265 +187,17 @@ function WhyRating({ s, units }: { s: ScenarioResult; units: number }) {
   );
 }
 
-function ScenarioCard({
-  s,
-  units = 1,
-  marketRentBenchmark,
-  paymentStandardPct,
-  cityLabel,
-  rentSource,
-}: {
-  s: ScenarioResult;
-  units?: number;
-  marketRentBenchmark?: number;
-  paymentStandardPct?: number;
-  cityLabel?: string | null;
-  rentSource?: "override" | "rent AVM" | "FMR" | "local ACS median" | null;
-}) {
-  const positive = s.monthlyCashFlow > 0;
-  const almost = s.ratingDetail.almost;
-  const isS8 = s.label === "Section 8";
-  const s8AboveMarket =
-    isS8 &&
-    marketRentBenchmark != null &&
-    s.monthlyRent > marketRentBenchmark * 1.05;
-  const pha = cityLabel ? `the ${cityLabel} housing authority` : "the local housing authority";
-  return (
-    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="font-semibold text-lg">{s.label}</h3>
-        <span className="inline-flex items-center gap-1.5">
-          <span
-            className="rounded-full px-3 py-0.5 text-sm font-semibold text-white"
-            style={{ backgroundColor: RATING_COLORS[s.rating] }}
-          >
-            {s.rating}
-          </span>
-          {almost && (
-            <span
-              className="rounded-full px-2.5 py-0.5 text-sm font-semibold border-2 border-dashed"
-              style={{
-                borderColor: RATING_COLORS[almost],
-                color: RATING_COLORS[almost],
-              }}
-            >
-              Almost {almost}
-            </span>
-          )}
-        </span>
-      </div>
-
-      <div>
-        <div className="text-sm text-zinc-500 dark:text-zinc-400">
-          Monthly cash flow (after mortgage)
-          <InfoTip text={TERM_HELP.cashFlow} />
-        </div>
-        <div
-          className={`text-4xl font-bold tabular-nums ${
-            positive ? "text-emerald-600" : "text-red-600"
-          }`}
-        >
-          {usd(s.monthlyCashFlow)}
-          <span className="text-base font-medium text-zinc-400"> /mo</span>
-        </div>
-        {almost && (
-          <div
-            className="text-sm font-medium mt-1"
-            style={{ color: RATING_COLORS[almost] }}
-          >
-            Only {formatGaps(s.ratingDetail)} away from {almost} — worth a
-            second look.
-          </div>
-        )}
-      </div>
-
-      {s8AboveMarket && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 text-amber-800 dark:text-amber-300 px-3 py-2 text-xs">
-          Heads up: this assumes {usd(s.monthlyRent)}/mo — above the estimated
-          market rent of {usd(marketRentBenchmark!)}/mo. Housing authorities
-          run a &ldquo;rent reasonableness&rdquo; check and won&apos;t approve
-          rent above comparable unassisted units, so the achievable Section 8
-          rent is likely closer to the market figure.{" "}
-          <b>
-            Call {pha} to ask what they&apos;d approve for this specific unit
-          </b>{" "}
-          (
-          <a
-            href="https://www.hud.gov/program_offices/public_indian_housing/pha/contacts"
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-          >
-            HUD PHA directory
-          </a>
-          ), or re-run with a lower payment standard % for the conservative
-          case.
-        </div>
-      )}
-
-      {!isS8 && rentSource === "FMR" && (
-        <div className="rounded-md bg-zinc-50 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400 px-3 py-2 text-xs">
-          Rent here is the <b>area-wide HUD FMR</b>, not an estimate for this
-          specific property. In cheaper submarkets actual rent often runs well
-          below FMR (and above it in hot pockets) — verify with local comps or
-          a property manager before trusting this number.
-        </div>
-      )}
-
-      {!isS8 && rentSource === "local ACS median" && (
-        <div className="rounded-md bg-zinc-50 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400 px-3 py-2 text-xs">
-          Rent here uses the <b>county&apos;s median rent for this bedroom
-          count</b> (Census ACS, inflated to current) because the HUD FMR for
-          this area runs above what local units actually rent for — FMRs can
-          carry adjustment factors borrowed from larger metro areas. This is
-          the conservative estimate; verify with local comps.
-        </div>
-      )}
-
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-        <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">
-            Rent
-            <InfoTip text={TERM_HELP.rent} />
-          </dt>
-          <dd className="font-semibold tabular-nums">{usd(s.monthlyRent)}/mo</dd>
-        </div>
-        <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">
-            Cash-on-cash ROI
-            <InfoTip text={TERM_HELP.coc} />
-          </dt>
-          <dd className="font-semibold tabular-nums">
-            {s.cashOnCashPct.toFixed(1)}%
-          </dd>
-        </div>
-        <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">
-            Cap rate
-            <InfoTip text={TERM_HELP.cap} />
-          </dt>
-          <dd className="font-semibold tabular-nums">{s.capRatePct.toFixed(1)}%</dd>
-        </div>
-        <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">
-            GRM
-            <InfoTip text={TERM_HELP.grm} />
-          </dt>
-          <dd className="font-semibold tabular-nums">{s.grm.toFixed(1)}</dd>
-        </div>
-        <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">
-            NOI (annual)
-            <InfoTip text={TERM_HELP.noi} />
-          </dt>
-          <dd className="font-semibold tabular-nums">{usd(s.noi)}</dd>
-        </div>
-        <div>
-          <dt className="text-zinc-500 dark:text-zinc-400">
-            Cash invested
-            <InfoTip text={TERM_HELP.cashInvested} />
-          </dt>
-          <dd className="font-semibold tabular-nums">{usd(s.cashInvested)}</dd>
-        </div>
-      </dl>
-
-      <WhyRating s={s} units={units} />
-
-      {isS8 && (
-        <details className="text-sm">
-          <summary className="cursor-pointer text-zinc-500 dark:text-zinc-400">
-            How the Section 8 numbers work
-          </summary>
-          <div className="mt-2 flex flex-col gap-2 text-xs text-zinc-600 dark:text-zinc-300">
-            <p>
-              HUD publishes a <b>Fair Market Rent (FMR)</b> for every area — the
-              40th-percentile gross rent, i.e. what the cheaper 40% of decent
-              units rent for (ZIP-level &ldquo;Small Area&rdquo; FMR where
-              available). The local housing authority (PHA) sets a{" "}
-              <b>payment standard</b> between 90% and 120% of FMR
-              {paymentStandardPct != null && (
-                <>
-                  {" "}
-                  — this card assumes <b>{paymentStandardPct}%</b>
-                </>
-              )}
-              . The voucher covers the gap between the tenant&apos;s ~30%
-              income contribution and the approved rent, paid directly to you.
-            </p>
-            <p>
-              Vacancy defaults to 2% (vs 5% market) because the voucher portion
-              keeps paying while a tenant stays, and demand for voucher-ready
-              units is deep. Offsets: annual PHA inspections, and initial
-              lease-up takes longer.
-            </p>
-            <p>
-              <b>The number to verify:</b> the PHA won&apos;t approve rent
-              above comparable unassisted units nearby (&ldquo;rent
-              reasonableness&rdquo;). In soft markets FMR can sit far above
-              real market rent, making this card look better than what the PHA
-              will actually approve. Call {pha} with this specific unit before
-              relying on FMR × payment standard —{" "}
-              <a
-                href="https://www.hud.gov/program_offices/public_indian_housing/pha/contacts"
-                target="_blank"
-                rel="noreferrer"
-                className="underline"
-              >
-                find their contact in HUD&apos;s PHA directory
-              </a>
-              .
-            </p>
-          </div>
-        </details>
-      )}
-
-      <details className="text-sm">
-        <summary className="cursor-pointer text-zinc-500 dark:text-zinc-400">
-          Monthly expense breakdown
-        </summary>
-        <table className="mt-2 w-full">
-          <tbody>
-            {(
-              [
-                ["Mortgage (P&I)", s.monthlyPI, TERM_HELP.pi],
-                ["Property taxes", s.expenses.taxes, null],
-                ["Insurance", s.expenses.insurance, null],
-                ["Maintenance reserve", s.expenses.maintenance, TERM_HELP.maintenance],
-                ["Management", s.expenses.management, TERM_HELP.management],
-                ["Vacancy allowance", s.expenses.vacancy, TERM_HELP.vacancy],
-                ["Other (HOA/utilities)", s.expenses.other, null],
-              ] as const
-            ).map(([name, amt, help]) => (
-              <tr key={name} className="border-b border-zinc-100 dark:border-zinc-800">
-                <td className="py-1 text-zinc-600 dark:text-zinc-300">
-                  {name}
-                  {help && <InfoTip text={help} />}
-                </td>
-                <td className="py-1 text-right tabular-nums">{usd(amt)}</td>
-              </tr>
-            ))}
-            <tr className="font-semibold">
-              <td className="py-1">Total outflow</td>
-              <td className="py-1 text-right tabular-nums">
-                {usd(s.expenses.totalMonthly + s.monthlyPI)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </details>
-    </div>
-  );
-}
-
 export default function Home() {
   const [address, setAddress] = useState("");
   const [price, setPrice] = useState<number | "">(100000);
   const [bedrooms, setBedrooms] = useState<number | "">(3);
   const [data, setData] = useState<AnalyzeResponse | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<Phase>("empty");
+  const [loadStep, setLoadStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [autoFilled, setAutoFilled] = useState<string | null>(null);
+  const [sources, setSources] = useState<SourceStatus | null>(null);
+  const stepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [adv, setAdv] = useState({ ...DEFAULT_ASSUMPTIONS });
   const setA = <K extends keyof typeof adv>(k: K, v: (typeof adv)[K]) =>
@@ -460,6 +217,13 @@ export default function Home() {
     new Set(ALL_RATINGS)
   );
   const [focusId, setFocusId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/sources")
+      .then((r) => r.json())
+      .then(setSources)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -532,29 +296,50 @@ export default function Home() {
     window.location.href = "/login";
   }
 
-  async function analyze(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
+  // The analyzing screen's six steps. /api/analyze is one server call that
+  // fans out internally, so the timer paces the display while the fetch is
+  // in flight and the response completes every step; keys that are not
+  // configured render "skipped · no key" and are never counted as queried.
+  const steps = useMemo(
+    () => [
+      { label: "Geocoding address", src: "Census", on: true },
+      { label: "Fair Market Rents", src: "HUD", on: sources?.hud ?? true },
+      { label: "Flood zone", src: "FEMA flood maps", on: true },
+      { label: "Property record and tax bill", src: "ATTOM", on: sources?.attom ?? false },
+      { label: "Short-term rental market", src: "Mashvisor", on: sources?.mashvisor ?? false },
+      { label: "Underwriting three scenarios", src: "local", on: true },
+    ],
+    [sources]
+  );
+
+  async function analyze(addr?: string) {
+    const target = (addr ?? address).trim();
+    if (!target) return;
+    setPhase("loading");
+    setLoadStep(0);
     setError(null);
-    setData(null);
+    setAutoFilled(null);
+    if (stepTimer.current) clearInterval(stepTimer.current);
+    stepTimer.current = setInterval(() => {
+      // hold on the last real fetch step until the response lands
+      setLoadStep((s) => Math.min(s + 1, 4));
+    }, 450);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address }),
+        body: JSON.stringify({ address: target }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Analysis failed");
-      setData(json);
+      const resp = json as AnalyzeResponse;
       // Auto-fill from real property data: listing (Mashvisor) wins, then
       // ATTOM's records — the user can still edit either field.
-      const resp = json as AnalyzeResponse;
       const listing = resp.mashvisor?.listing;
       const bedsAuto = listing?.beds ?? resp.attom?.beds;
       const priceAuto = listing?.listPrice;
       if (bedsAuto != null) setBedrooms(bedsAuto);
       if (priceAuto != null) setPrice(Math.round(priceAuto));
-      // county's real rental vacancy replaces the 5% guess (edit freely)
       const vacancyAuto = resp.acsRent?.rentalVacancyPct;
       if (vacancyAuto != null) {
         setAdv((p) => ({
@@ -565,27 +350,40 @@ export default function Home() {
       const filled = [
         priceAuto != null ? "price" : null,
         bedsAuto != null ? "bedrooms" : null,
-        vacancyAuto != null ? `vacancy (county actual ${vacancyAuto}%)` : null,
+        vacancyAuto != null
+          ? `empty-months rate (county actual ${vacancyAuto}%)`
+          : null,
       ].filter(Boolean);
       setAutoFilled(
-        filled.length
-          ? `${filled.join(" & ")} auto-filled — edit freely`
-          : null
+        filled.length ? `${filled.join(" & ")} auto-filled — edit freely` : null
       );
+      setData(resp);
+      setLoadStep(6);
+      setPhase("results");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analysis failed");
+      setPhase(data ? "results" : "empty");
     } finally {
-      setLoading(false);
+      if (stepTimer.current) {
+        clearInterval(stepTimer.current);
+        stepTimer.current = null;
+      }
     }
   }
 
-  // "312 WALNUT ST, CINCINNATI, OH, 45202" → "Cincinnati" for PHA guidance
-  const cityLabel = useMemo(() => {
-    const city = data?.property.matchedAddress.split(",")[1]?.trim() ?? "";
-    return city
-      ? city.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-      : null;
-  }, [data]);
+  function useSample() {
+    setAddress(SAMPLE.address);
+    setPrice(SAMPLE.price);
+    setBedrooms(SAMPLE.beds);
+    analyze(SAMPLE.address);
+  }
+
+  function startOver() {
+    setData(null);
+    setError(null);
+    setAutoFilled(null);
+    setPhase("empty");
+  }
 
   const scenarios = useMemo(() => {
     if (!data || price === "" || bedrooms === "") return null;
@@ -597,26 +395,47 @@ export default function Home() {
     return computeScenariosFromData(data, a);
   }, [data, price, bedrooms, adv]);
 
+  const assumptionsFull = useMemo<Assumptions | null>(() => {
+    if (price === "" || bedrooms === "") return null;
+    return { ...adv, price: Number(price), bedrooms: Number(bedrooms) };
+  }, [adv, price, bedrooms]);
+
+  const ranked = useMemo<RankedScenario[]>(
+    () => (scenarios ? rankScenarios(scenarios) : []),
+    [scenarios]
+  );
+
+  const verdict = useMemo(() => {
+    if (!scenarios || !assumptionsFull || ranked.length === 0) return null;
+    return buildVerdict(scenarios, assumptionsFull, {
+      occupancyPct: data?.mashvisor?.str?.occupancyPct,
+      revenue: scenarios.str?.monthlyRent,
+    });
+  }, [scenarios, assumptionsFull, ranked, data]);
+
   const outlook = useMemo(() => {
-    if (!data || !scenarios || price === "" || bedrooms === "") return null;
-    const a: Assumptions = {
-      ...adv,
-      price: Number(price),
-      bedrooms: Number(bedrooms),
-    };
+    if (!data || !scenarios || !assumptionsFull) return null;
     return {
-      stress: stressTest(data, a, scenarios),
+      stress: stressTest(data, assumptionsFull, scenarios),
       projection: scenarios.market
-        ? projectFiveYears(scenarios.market, a)
+        ? projectFiveYears(scenarios.market, assumptionsFull)
         : null,
     };
-  }, [data, scenarios, price, bedrooms, adv]);
+  }, [data, scenarios, assumptionsFull]);
+
+  // "312 WALNUT ST, CINCINNATI, OH, 45202" → "Cincinnati" for PHA guidance
+  const cityLabel = useMemo(() => {
+    const city = data?.property.matchedAddress.split(",")[1]?.trim() ?? "";
+    return city
+      ? city.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+      : null;
+  }, [data]);
 
   // Auto-save/update the analyzed property as a map pin; assumption tweaks
   // live-update its snapshot.
   useEffect(() => {
-    if (!data || !scenarios || (!scenarios.market && !scenarios.s8 && !scenarios.str))
-      return;
+    if (!data || !scenarios) return;
+    if (!scenarios.market && !scenarios.s8 && !scenarios.str) return;
     if (price === "" || bedrooms === "") return;
     const pin = buildPin(data, scenarios, Number(price), Number(bedrooms));
     setSavedPins((prev) => {
@@ -635,629 +454,1303 @@ export default function Home() {
     [savedPins, colorBy, ratingFilter]
   );
 
+  const dealDate = useMemo(
+    () =>
+      new Date().toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      }),
+    []
+  );
+
+  const cashIn = ranked[0]?.s.cashInvested ?? null;
+  const beds = data?.mashvisor?.listing?.beds ?? data?.attom?.beds ?? bedrooms;
+  const baths = data?.mashvisor?.listing?.baths ?? data?.attom?.baths;
+  const sqft = data?.mashvisor?.listing?.sqft ?? data?.attom?.sqft;
+  const yearBuilt =
+    data?.mashvisor?.listing?.yearBuilt ?? data?.attom?.yearBuilt;
+
+  const subhead = data
+    ? [
+        `${data.property.countyName}, ${data.property.state}`,
+        beds !== "" && beds != null
+          ? `${beds} bed${baths != null ? ` / ${baths} bath` : ""}`
+          : null,
+        sqft != null ? `${sqft.toLocaleString()} sqft` : null,
+        yearBuilt != null ? `built ${yearBuilt}` : null,
+        price !== "" ? `asking ${usd(Number(price))}` : null,
+        cashIn != null ? `${usd(cashIn)} cash in` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
+
+  const divergePct =
+    data?.attom?.rentalAvm != null && scenarios?.fmrRent != null
+      ? (Math.abs(data.attom.rentalAvm - scenarios.fmrRent) /
+          scenarios.fmrRent) *
+        100
+      : null;
+
+  const hudMissing = Boolean(data && !data.fmr);
+  const mvMissing = Boolean(data && !data.mashvisor?.str);
+
   return (
-    <main className="mx-auto max-w-5xl px-4 py-8 flex flex-col gap-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Real Estate Cash Flow Analyzer</h1>
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1">
-            Enter an address and price — get monthly cash flow, ROI, cap rate and a
-            deal rating for market-rate and Section 8 rentals. Built on free HUD,
-            FEMA and Census data, upgraded with ATTOM property records when an API
-            key is configured.
-          </p>
-        </div>
-        {user && (
-          <div className="flex items-center gap-2 text-sm whitespace-nowrap">
-            <span className="text-zinc-500 dark:text-zinc-400">
-              {user}
-              {!persistent && " (local only)"}
-            </span>
-            <button
-              onClick={signOut}
-              className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-zinc-600 dark:text-zinc-300"
-            >
-              Sign out
-            </button>
-          </div>
-        )}
-      </header>
-
-      <form
-        onSubmit={analyze}
-        className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 flex flex-col gap-4"
-      >
-        <div className="grid grid-cols-1 sm:grid-cols-[1fr_140px_110px_auto] gap-3 items-end">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-zinc-500 dark:text-zinc-400">Property address</span>
-            <input
-              required
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="123 Main St, Cincinnati, OH 45202"
-              className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5"
-            />
-          </label>
-          <NumInput label="Purchase price" value={price} onChange={setPrice} step={1000} />
-          <NumInput label="Bedrooms" value={bedrooms} onChange={setBedrooms} />
-          <button
-            type="submit"
-            disabled={loading}
-            className="rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold px-5 py-2"
-          >
-            {loading ? "Analyzing…" : "Analyze"}
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setShowAdvanced((s) => !s)}
-            className="text-sm text-emerald-700 dark:text-emerald-400"
-          >
-            {showAdvanced ? "▾ Hide" : "▸ Show"} financing & expense assumptions
-          </button>
-          {liveRate && (
-            <span className="text-xs text-zinc-400">
-              rate default: {liveRate.pct}% — current 30-yr avg (Freddie Mac,{" "}
-              {liveRate.asOf})
-            </span>
-          )}
-        </div>
-
-        {showAdvanced && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <NumInput label="Down payment" suffix="%" value={adv.downPaymentPct} onChange={(v) => setA("downPaymentPct", v === "" ? 0 : v)} step={5} />
-            <NumInput label="Interest rate" suffix="%" value={adv.interestRatePct} onChange={(v) => setA("interestRatePct", v === "" ? 0 : v)} step={0.125} />
-            <NumInput label="Loan term" suffix="yrs" value={adv.loanTermYears} onChange={(v) => setA("loanTermYears", v === "" ? 30 : v)} />
-            <NumInput label="Rehab budget" suffix="$" value={adv.rehabCost} onChange={(v) => setA("rehabCost", v === "" ? 0 : v)} step={1000} />
-            <NumInput label="Market rent override" suffix="$/mo" placeholder="auto (FMR)" value={adv.marketRentOverride ?? ""} onChange={(v) => setA("marketRentOverride", v === "" ? null : v)} step={25} />
-            <NumInput label="Payment standard" suffix="% FMR" value={adv.paymentStandardPct} onChange={(v) => setA("paymentStandardPct", v === "" ? 100 : v)} step={5} />
-            <NumInput label="Tax rate override" suffix="%/yr" placeholder="auto" value={adv.taxRateOverride ?? ""} onChange={(v) => setA("taxRateOverride", v === "" ? null : v)} step={0.1} />
-            <NumInput label="Insurance" suffix="%/yr" value={adv.insurancePctOfValue} onChange={(v) => setA("insurancePctOfValue", v === "" ? 0.5 : v)} step={0.1} />
-            <NumInput label="Maintenance" suffix="%/yr" value={adv.maintenancePctOfValue} onChange={(v) => setA("maintenancePctOfValue", v === "" ? 1 : v)} step={0.25} />
-            <NumInput label="Management" suffix="% rent" value={adv.managementPct} onChange={(v) => setA("managementPct", v === "" ? 0 : v)} />
-            <NumInput label="Vacancy (market)" suffix="%" value={adv.vacancyPctMarket} onChange={(v) => setA("vacancyPctMarket", v === "" ? 5 : v)} />
-            <NumInput label="Vacancy (Sec. 8)" suffix="%" value={adv.vacancyPctSection8} onChange={(v) => setA("vacancyPctSection8", v === "" ? 2 : v)} />
-            <NumInput label="Other income" suffix="$/mo" value={adv.otherMonthlyIncome} onChange={(v) => setA("otherMonthlyIncome", v === "" ? 0 : v)} step={25} />
-            <NumInput label="Other expenses" suffix="$/mo" value={adv.otherMonthlyExpense} onChange={(v) => setA("otherMonthlyExpense", v === "" ? 0 : v)} step={25} />
-            <NumInput label="Units" value={adv.units} onChange={(v) => setA("units", v === "" ? 1 : v)} />
-            <NumInput label="STR management" suffix="% rev" value={adv.strManagementPct} onChange={(v) => setA("strManagementPct", v === "" ? 20 : v)} step={5} />
-            <NumInput label="STR extra costs" suffix="$/mo" value={adv.strOtherMonthlyExpense} onChange={(v) => setA("strOtherMonthlyExpense", v === "" ? 250 : v)} step={25} />
-            <NumInput label="Insurance floor" suffix="$/mo" value={adv.insuranceFloorMonthly} onChange={(v) => setA("insuranceFloorMonthly", v === "" ? 0 : v)} step={5} />
-            <NumInput label="Maintenance floor" suffix="$/mo" value={adv.maintenanceFloorMonthly} onChange={(v) => setA("maintenanceFloorMonthly", v === "" ? 0 : v)} step={10} />
-            <NumInput label="Appreciation" suffix="%/yr" value={adv.appreciationPctAnnual} onChange={(v) => setA("appreciationPctAnnual", v === "" ? 3 : v)} step={0.5} />
-            <NumInput label="Selling costs" suffix="%" value={adv.sellingCostPct} onChange={(v) => setA("sellingCostPct", v === "" ? 7 : v)} step={0.5} />
-          </div>
-        )}
-      </form>
-
-      <BatchImport
-        assumptions={adv}
-        defaultPrice={price === "" ? 100000 : Number(price)}
-        defaultBedrooms={bedrooms === "" ? 3 : Number(bedrooms)}
+    <div className="grid min-h-screen grid-cols-[300px_minmax(0,1fr)] items-start max-lg:grid-cols-1">
+      <AssumptionsSidebar
+        address={address}
+        onAddress={setAddress}
+        price={price}
+        onPrice={setPrice}
+        bedrooms={bedrooms}
+        onBedrooms={setBedrooms}
+        adv={adv}
+        setA={setA}
+        onReset={() =>
+          setAdv((p) => ({
+            ...DEFAULT_ASSUMPTIONS,
+            interestRatePct: liveRate?.pct ?? DEFAULT_ASSUMPTIONS.interestRatePct,
+          }))
+        }
+        onAnalyze={() => analyze()}
+        analyzing={phase === "loading"}
+        sources={sources}
+        liveRate={liveRate}
+        user={user}
+        persistent={persistent}
+        onSignOut={signOut}
+        batchAssumptions={adv}
+        batchDefaultPrice={price === "" ? 100000 : Number(price)}
+        batchDefaultBedrooms={bedrooms === "" ? 3 : Number(bedrooms)}
         onPin={(pin) =>
           setSavedPins((prev) => [...prev.filter((p) => p.id !== pin.id), pin])
         }
       />
 
-      {error && (
-        <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-950 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 text-sm">
-          {error}
-        </div>
-      )}
-
-      {data && (
-        <section className="flex flex-col gap-4">
-          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-1">
-            <span className="font-semibold">{data.property.matchedAddress}</span>
-            <span>
-              {data.property.countyName}, {data.property.state}
-            </span>
-            {data.mashvisor?.listing && (
-              <span>
-                Listing:{" "}
-                {data.mashvisor.listing.listPrice != null && (
-                  <b>{usd(data.mashvisor.listing.listPrice)}</b>
-                )}
-                {data.mashvisor.listing.beds != null && (
-                  <> · {data.mashvisor.listing.beds} bd</>
-                )}
-                {data.mashvisor.listing.baths != null && (
-                  <>/{data.mashvisor.listing.baths} ba</>
-                )}
-                {data.mashvisor.listing.sqft != null && (
-                  <> · {data.mashvisor.listing.sqft.toLocaleString()} sqft</>
-                )}
-              </span>
-            )}
-            {autoFilled && (
-              <span className="text-emerald-700 dark:text-emerald-400">
-                ✓ {autoFilled}
-              </span>
-            )}
-            {data.attom?.beds != null && (
-              <span>
-                {data.attom.beds} bd
-                {data.attom.baths != null && <> / {data.attom.baths} ba</>}
-                {data.attom.sqft != null && (
-                  <> · {data.attom.sqft.toLocaleString()} sqft</>
-                )}
-                {data.attom.yearBuilt != null && <> · built {data.attom.yearBuilt}</>}
-              </span>
-            )}
-            {data.attom?.avmValue != null && (
-              <span>
-                Est. value (AVM): <b>{usd(data.attom.avmValue)}</b>
-                {data.attom.avmConfidence != null && (
-                  <span className="text-zinc-500">
-                    {" "}
-                    (confidence {data.attom.avmConfidence}/100)
-                  </span>
-                )}
-              </span>
-            )}
-            {data.attom?.lastSalePrice != null && (
-              <span>
-                Last sale: <b>{usd(data.attom.lastSalePrice)}</b>
-                {data.attom.lastSaleDate && (
-                  <span className="text-zinc-500">
-                    {" "}
-                    ({data.attom.lastSaleDate.slice(0, 4)})
-                  </span>
-                )}
-              </span>
-            )}
-            {data.attom?.rentalAvm != null && (
-              <span>
-                Rent AVM: <b>{usd(data.attom.rentalAvm)}</b>/mo
-                {scenarios?.marketRentSource === "rent AVM" && (
-                  <span className="text-zinc-500"> (used for market scenario)</span>
-                )}
-              </span>
-            )}
-            {data.mashvisor?.str && (
-              <span>
-                Airbnb market:{" "}
-                {data.mashvisor.str.occupancyPct != null && (
-                  <>
-                    <b>{data.mashvisor.str.occupancyPct.toFixed(0)}%</b> occupancy
-                  </>
-                )}
-                {data.mashvisor.str.nightlyRate != null && (
-                  <> · <b>{usd(data.mashvisor.str.nightlyRate)}</b>/night</>
-                )}
-                {data.mashvisor.str.monthlyRevenue != null && (
-                  <> · <b>{usd(data.mashvisor.str.monthlyRevenue)}</b>/mo</>
-                )}
-                <span className="text-zinc-500"> (Mashvisor)</span>
-              </span>
-            )}
-            {data.fmr && (
-              <span>
-                FY{data.fmr.year} {data.fmr.smallAreaUsed ? "Small-Area " : ""}FMR
-                ({data.fmr.areaName}){scenarios?.fmrRent != null && (
-                  <>: <b>{usd(scenarios.fmrRent)}</b>/mo for {bedrooms} BR</>
-                )}
-                <InfoTip text="HUD Fair Market Rent — the 40th-percentile gross rent for this area (ZIP-level where available). It's the basis for Section 8 payment standards and our conservative market-rent estimate." />
-              </span>
-            )}
-            {scenarios?.acsRentForBeds != null && (
-              <span>
-                Local median rent: <b>{usd(scenarios.acsRentForBeds)}</b>/mo for{" "}
-                {bedrooms} BR
-                <InfoTip
-                  text={
-                    data.acsRent?.source ??
-                    "County median gross rent for this bedroom count (Census ACS), inflated to current dollars — the local reality check on the area-wide FMR."
-                  }
-                />
-              </span>
-            )}
-            <span>
-              Flood zone:{" "}
-              <b className={data.flood.highRisk ? "text-red-600" : ""}>
-                {data.flood.zone ?? "none mapped"}
-              </b>
-              {data.flood.highRisk && " (high risk — insurance increased 40%)"}
-              {data.flood.moderateRisk && " (moderate risk — insurance +15%)"}
-            </span>
-            <span>
-              Tax rate used:{" "}
-              <b>{((scenarios?.taxRate ?? data.tax.effectiveRate) * 100).toFixed(2)}%</b>{" "}
-              <span className="text-zinc-500">
-                ({scenarios?.taxSource ?? data.tax.source})
-              </span>
+      <main className="flex max-w-[1120px] flex-col gap-9 px-12 pb-[70px] pt-10 max-md:px-5">
+        {error && (
+          <div className="border-l-[3px] border-negative bg-accent-tint py-[14px] pl-4">
+            <span className="text-[13px] font-semibold text-warn-ink">
+              {error}
             </span>
           </div>
+        )}
 
-          {data.marketHealth && (
-            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 px-4 py-3 text-sm flex flex-wrap gap-x-6 gap-y-1">
-              <span className="font-semibold">
-                Market health ({data.marketHealth.countyName})
-                <InfoTip text="County trajectory: 5-year change from Census ACS plus BLS unemployment. Shrinking population is the classic risk hiding behind cheap, high-cash-flow markets — rents and values erode and vacancies stretch." />
-              </span>
-              {data.marketHealth.populationChangePct5yr != null && (
-                <span
-                  className={
-                    data.marketHealth.populationChangePct5yr < 0
-                      ? "text-red-600 dark:text-red-400"
-                      : ""
-                  }
+        {phase === "empty" && (
+          <section className="flex flex-col gap-[34px]">
+            <div className="flex flex-col gap-[14px] border-b-2 border-ink pb-[22px]">
+              <Eyebrow>Start here</Eyebrow>
+              <h2 className="max-w-[26ch] font-serif text-[40px] font-medium leading-[1.12] tracking-[-.02em] [text-wrap:pretty]">
+                Underwrite one house three ways, then decide.
+              </h2>
+              <p className="max-w-[62ch] font-serif text-[17px] leading-[1.6] text-prose [text-wrap:pretty]">
+                Enter an address and a price. The analyzer pulls the county, the
+                HUD Fair Market Rent, the FEMA flood zone and the tax rate, then
+                reports monthly cash flow after debt service for market rent,
+                Section 8 and short-term rental — plus which of the three you
+                should actually run.
+              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-3">
+                <button
+                  onClick={useSample}
+                  className="cursor-pointer rounded-[2px] bg-accent px-5 py-[11px] text-[13px] font-semibold text-field hover:bg-accent-hover"
                 >
-                  Population{" "}
-                  <b>
-                    {data.marketHealth.populationChangePct5yr >= 0 ? "+" : ""}
-                    {data.marketHealth.populationChangePct5yr.toFixed(1)}%
-                  </b>{" "}
-                  (5 yr
-                  {data.marketHealth.population != null &&
-                    `, now ${data.marketHealth.population.toLocaleString()}`}
-                  )
+                  Try the sample deal
+                </button>
+                <span className="text-[13px] text-body">
+                  1418 Vine St, Cincinnati — $118,000, 3 bed
                 </span>
-              )}
-              {data.marketHealth.valueChangePct5yr != null && (
-                <span>
-                  Median value{" "}
-                  <b>
-                    {data.marketHealth.valueChangePct5yr >= 0 ? "+" : ""}
-                    {data.marketHealth.valueChangePct5yr.toFixed(0)}%
-                  </b>{" "}
-                  (5 yr
-                  {data.marketHealth.medianValue != null &&
-                    `, now ${usd(data.marketHealth.medianValue)}`}
-                  )
-                </span>
-              )}
-              {data.marketHealth.unemploymentPct != null && (
-                <span
-                  className={
-                    data.marketHealth.unemploymentPct >= 7
-                      ? "text-red-600 dark:text-red-400"
-                      : ""
-                  }
-                >
-                  Unemployment <b>{data.marketHealth.unemploymentPct.toFixed(1)}%</b>
-                  {data.marketHealth.unemploymentAsOf && (
-                    <span className="text-zinc-500">
-                      {" "}
-                      ({data.marketHealth.unemploymentAsOf})
+              </div>
+            </div>
+
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-x-11 gap-y-[34px]">
+              <div className="flex flex-col">
+                <h3 className="mb-1 border-b-2 border-ink pb-2 font-serif text-[21px] font-medium">
+                  What you get back
+                </h3>
+                {[
+                  [
+                    "A recommendation, not a dashboard",
+                    "Which of the three strategies wins, by how much, and what it costs you in certainty.",
+                  ],
+                  [
+                    "Monthly cash flow after the mortgage",
+                    "The headline number, with cash-on-cash, cap rate, GRM and NOI behind it.",
+                  ],
+                  [
+                    "Every line item, side by side",
+                    "Where the rent goes in each scenario, so a surprise is a number you can point at.",
+                  ],
+                  [
+                    "A pin on the deal map",
+                    "Every address you analyze is saved and colored by rating, so the pattern shows up.",
+                  ],
+                ].map(([title, body], i, arr) => (
+                  <div
+                    key={title}
+                    className={`flex gap-[14px] py-[14px] ${
+                      i < arr.length - 1 ? "border-b border-rule" : ""
+                    }`}
+                  >
+                    <span className="w-[22px] font-serif text-[19px] leading-[1.2] text-accent">
+                      {i + 1}
                     </span>
-                  )}
-                </span>
+                    <div className="flex flex-col gap-[3px]">
+                      <span className="text-[13.5px] font-medium">{title}</span>
+                      <span className="text-[12.5px] leading-[1.55] text-body">
+                        {body}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-col">
+                <h3 className="mb-1 border-b-2 border-ink pb-2 font-serif text-[21px] font-medium">
+                  How deals are rated
+                </h3>
+                {(
+                  [
+                    ["Rare", "≥ $400/mo cash flow · ≥ 12% cash-on-cash · ≥ 8% cap rate"],
+                    ["Fantastic", "≥ $250/mo cash flow · ≥ 10% cash-on-cash"],
+                    ["Great", "≥ $150/mo cash flow · ≥ 8% cash-on-cash"],
+                    ["Good", "> $50/mo cash flow · ≥ 5% cash-on-cash"],
+                    ["Poor", "Anything else, break-even included"],
+                  ] as [Rating, string][]
+                ).map(([rating, req]) => (
+                  <div
+                    key={rating}
+                    className="flex items-center justify-between gap-3 border-b border-rule py-[11px]"
+                  >
+                    <RatingBadge rating={rating} />
+                    <span className="text-right text-[12.5px] text-[#4a423a]">
+                      {req}
+                    </span>
+                  </div>
+                ))}
+                <p className="mt-[14px] font-serif text-[14px] leading-[1.6] text-[#4a423a]">
+                  Thresholds are per unit. A deal that misses the next tier by
+                  less than $50/mo, 1.5 points of cash-on-cash or 1 point of cap
+                  rate is flagged <i>Almost</i> with the exact shortfall — $13 a
+                  month should not decide a purchase.
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {phase === "loading" && (
+          <section className="flex flex-col gap-[26px]">
+            <header className="flex flex-col gap-[10px] border-b-2 border-ink pb-[18px]">
+              <Eyebrow>Underwriting</Eyebrow>
+              <h2 className="font-serif text-[32px] font-medium leading-[1.15] tracking-[-.02em]">
+                {address || SAMPLE.address}
+              </h2>
+            </header>
+            <div className="flex max-w-[560px] flex-col">
+              {steps.map((s, i) => {
+                const done = loadStep > i;
+                const active = loadStep === i;
+                return (
+                  <div
+                    key={s.label}
+                    className="flex items-center gap-3 border-b border-rule py-[11px]"
+                  >
+                    <span
+                      className={`h-4 w-4 shrink-0 rounded-full border ${
+                        active ? "animate-step-pulse" : ""
+                      }`}
+                      style={{
+                        borderColor: !s.on
+                          ? "#d9cfbe"
+                          : done
+                            ? "#2f6b4f"
+                            : active
+                              ? "#96552a"
+                              : "#d9cfbe",
+                        background: !s.on
+                          ? "transparent"
+                          : done
+                            ? "#2f6b4f"
+                            : active
+                              ? "#96552a"
+                              : "transparent",
+                      }}
+                    />
+                    <span
+                      className="text-[13.5px]"
+                      style={{
+                        color: !s.on ? "#7a7165" : done || active ? "#1d1a16" : "#7a7165",
+                      }}
+                    >
+                      {s.label}
+                    </span>
+                    <span className="ml-auto text-[12px] text-label">
+                      {!s.on
+                        ? "skipped · no key"
+                        : done
+                          ? `${s.src} ✓`
+                          : active
+                            ? `querying ${s.src}…`
+                            : s.src}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex max-w-[560px] flex-col gap-3">
+              <div className="h-3 w-[70%] rounded-[1px] bg-skeleton" />
+              <div className="h-3 w-[92%] rounded-[1px] bg-skeleton" />
+              <div className="h-3 w-[54%] rounded-[1px] bg-skeleton" />
+            </div>
+          </section>
+        )}
+
+        {phase === "results" && data && (
+          <section className="flex flex-col gap-9">
+            <header className="flex flex-col gap-3 border-b-2 border-ink pb-[18px]">
+              <div className="flex flex-wrap items-baseline justify-between gap-3">
+                <Eyebrow>Deal brief · {dealDate}</Eyebrow>
+                <div className="flex gap-4 text-[12px]">
+                  <button
+                    onClick={() => window.print()}
+                    className="cursor-pointer border-b border-accent/30 text-accent hover:text-link-hover"
+                  >
+                    Export PDF
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard?.writeText(window.location.href).catch(() => {});
+                    }}
+                    className="cursor-pointer border-b border-accent/30 text-accent hover:text-link-hover"
+                  >
+                    Share with partner
+                  </button>
+                  <button
+                    onClick={startOver}
+                    className="cursor-pointer border-b border-accent/30 text-accent hover:text-link-hover"
+                  >
+                    Start over
+                  </button>
+                </div>
+              </div>
+              <h2 className="font-serif text-[38px] font-medium leading-[1.1] tracking-[-.02em]">
+                {data.property.matchedAddress}
+              </h2>
+              <div className="text-[13px] text-body">{subhead}</div>
+              {autoFilled && (
+                <div className="text-[12px] text-positive">✓ {autoFilled}</div>
               )}
-            </div>
-          )}
+            </header>
 
-          {data.fmrError && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 text-amber-800 dark:text-amber-300 px-4 py-3 text-sm">
-              HUD data unavailable: {data.fmrError} You can still analyze with a
-              manual rent override under advanced assumptions.
-            </div>
-          )}
-
-          {data.attomError && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 text-amber-800 dark:text-amber-300 px-4 py-3 text-sm">
-              ATTOM data unavailable: {data.attomError} Falling back to HUD FMR
-              rents and the statewide tax estimate.
-            </div>
-          )}
-
-          {data.mashvisorError && (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 text-amber-800 dark:text-amber-300 px-4 py-3 text-sm">
-              Mashvisor data unavailable: {data.mashvisorError} The Airbnb
-              scenario and data fidelity check are skipped.
-            </div>
-          )}
-
-          {data.attom?.rentalAvm != null &&
-            scenarios?.fmrRent != null &&
-            Math.abs(data.attom.rentalAvm - scenarios.fmrRent) /
-              scenarios.fmrRent >
-              0.15 && (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950 dark:border-amber-800 text-amber-800 dark:text-amber-300 px-4 py-3 text-sm">
-                Rent signals diverge: ATTOM&apos;s rent AVM (
-                {usd(data.attom.rentalAvm)}/mo) is{" "}
-                {Math.round(
-                  (Math.abs(data.attom.rentalAvm - scenarios.fmrRent) /
-                    scenarios.fmrRent) *
-                    100
-                )}
-                % {data.attom.rentalAvm > scenarios.fmrRent ? "above" : "below"}{" "}
-                the HUD FMR ({usd(scenarios.fmrRent)}/mo for {bedrooms} BR).
-                Verify with local comps before trusting either number.
+            {hudMissing && (
+              <div className="border-l-[3px] border-warn bg-accent-tint py-[14px] pl-4">
+                <div className="flex flex-col gap-[5px]">
+                  <span className="text-[13px] font-semibold text-warn-ink">
+                    No HUD data — the Section 8 scenario is unavailable.
+                  </span>
+                  <p className="m-0 max-w-[76ch] font-serif text-[14px] leading-[1.6] text-warn-ink">
+                    {data.attom?.rentalAvm != null
+                      ? "Section 8 rent is FMR × payment standard, so that scenario stays dark until a free token from huduser.gov is in place. Market rent is unaffected — it falls back to ATTOM's rental AVM, which is property-specific rather than a county-wide 40th percentile."
+                      : "Section 8 rent is FMR × payment standard, and with no ATTOM key either there is no market-rent baseline to fall back on. Register a free HUD token at huduser.gov, or enter a real comp in Market rent override to underwrite the market case by hand."}
+                    {data.fmrError && (
+                      <span className="text-[12px]"> ({data.fmrError})</span>
+                    )}
+                  </p>
+                </div>
               </div>
             )}
 
-          <div
-            className={`grid grid-cols-1 md:grid-cols-2 ${
-              scenarios?.str ? "xl:grid-cols-3" : ""
-            } gap-4`}
-          >
-            {scenarios?.market && (
-              <ScenarioCard
-                s={scenarios.market}
-                units={adv.units}
-                rentSource={scenarios.marketRentSource}
-              />
-            )}
-            {scenarios?.s8 && (
-              <ScenarioCard
-                s={scenarios.s8}
-                units={adv.units}
-                marketRentBenchmark={scenarios.market?.monthlyRent}
-                paymentStandardPct={adv.paymentStandardPct}
-                cityLabel={cityLabel}
-              />
-            )}
-            {scenarios?.str && (
-              <ScenarioCard s={scenarios.str} units={adv.units} />
-            )}
-          </div>
-
-          {outlook && (outlook.stress || outlook.projection) && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {outlook.stress && (
-                <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 flex flex-col gap-3">
-                  <h3 className="font-semibold text-lg">
-                    Stress test
-                    <InfoTip text="Recomputes the market scenario with estimates moved against you. A deal that only works when every estimate is exactly right isn't a deal — look for cash flow that survives the 'all three' row." />
-                  </h3>
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {outlook.stress.map((row) => (
-                        <tr
-                          key={row.label}
-                          className="border-b border-zinc-100 dark:border-zinc-800"
-                        >
-                          <td className="py-1.5 text-zinc-600 dark:text-zinc-300">
-                            {row.label}
-                          </td>
-                          <td
-                            className={`py-1.5 text-right tabular-nums font-semibold ${
-                              row.monthlyCashFlow > 0
-                                ? "text-emerald-600"
-                                : "text-red-600"
-                            }`}
-                          >
-                            {usd(row.monthlyCashFlow)}/mo
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <p className="text-xs text-zinc-400">
-                    Market scenario. Rent −10%, vacancy +5 points, rate +1
-                    point — each alone, then combined.
+            {mvMissing && (
+              <div className="border-l-[3px] border-label bg-sidebar py-[14px] pl-4">
+                <div className="flex flex-col gap-[5px]">
+                  <span className="text-[13px] font-semibold text-[#4a423a]">
+                    {data.mashvisorError
+                      ? "Mashvisor unavailable — the short-term rental scenario is skipped."
+                      : "No Mashvisor key — the short-term rental scenario is skipped."}
+                  </span>
+                  <p className="m-0 max-w-[76ch] font-serif text-[14px] leading-[1.6] text-[#4a423a]">
+                    Occupancy and nightly rate come from Mashvisor; without them
+                    there is no honest STR number to show. The two long-term
+                    scenarios below are unaffected, and the fidelity check falls
+                    back to ATTOM alone.
+                    {data.mashvisorError && (
+                      <span className="text-[12px]"> ({data.mashvisorError})</span>
+                    )}
                   </p>
                 </div>
-              )}
-              {outlook.projection && (
-                <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 flex flex-col gap-3">
-                  <h3 className="font-semibold text-lg">
-                    5-year hold projection
-                    <InfoTip text="Total return, not just monthly cash flow: appreciation at your assumed rate, loan principal paid down by the tenant, and cumulative cash flow (held flat — no rent growth assumed), minus selling costs on exit." />
+              </div>
+            )}
+
+            {data.attomError && (
+              <div className="border-l-[3px] border-label bg-sidebar py-[14px] pl-4">
+                <div className="flex flex-col gap-[5px]">
+                  <span className="text-[13px] font-semibold text-[#4a423a]">
+                    ATTOM unavailable — property record, tax bill and rent
+                    estimate fall back to free sources.
+                  </span>
+                  <p className="m-0 max-w-[76ch] font-serif text-[14px] leading-[1.6] text-[#4a423a]">
+                    The tax line uses the county median instead of this parcel&apos;s
+                    actual bill, and the market rent leans on HUD and Census
+                    data. <span className="text-[12px]">({data.attomError})</span>
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {verdict && ranked.length > 0 && (
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] items-start gap-x-11 gap-y-[30px]">
+                <div className="flex flex-col gap-[14px]">
+                  <Eyebrow>The call</Eyebrow>
+                  <h3 className="font-serif text-[31px] font-medium leading-[1.22] tracking-[-.015em] [text-wrap:pretty]">
+                    {verdict.headline}
                   </h3>
-                  <table className="w-full text-sm">
-                    <tbody>
+                  <p className="max-w-[60ch] font-serif text-[16.5px] leading-[1.62] text-prose [text-wrap:pretty]">
+                    {verdict.p1}
+                  </p>
+                  <p className="max-w-[60ch] font-serif text-[16.5px] leading-[1.62] text-prose [text-wrap:pretty]">
+                    {verdict.p2}
+                  </p>
+                </div>
+
+                <div className="flex flex-col border-t-2 border-ink">
+                  {ranked.map((r, i) => {
+                    const maxAbs = Math.max(
+                      1,
+                      ...ranked.map((x) => Math.abs(x.s.monthlyCashFlow))
+                    );
+                    const width = Math.max(
+                      3,
+                      (Math.abs(r.s.monthlyCashFlow) / maxAbs) * 100
+                    );
+                    return (
+                      <div
+                        key={r.key}
+                        className="flex flex-col gap-[6px] border-b border-rule py-[14px]"
+                      >
+                        <div className="flex items-baseline justify-between gap-[10px]">
+                          <span className="text-[10.5px] font-semibold uppercase tracking-[.12em] text-label">
+                            {ladderEyebrow(ranked, i)}
+                          </span>
+                          <RatingBadge rating={r.s.rating} small />
+                        </div>
+                        <span
+                          className={`font-serif text-[38px] font-medium leading-none tracking-[-.02em] ${cfClass(r.s.monthlyCashFlow)}`}
+                        >
+                          {signedUsd(r.s.monthlyCashFlow)}/mo
+                        </span>
+                        <div className="h-[6px] overflow-hidden rounded-[1px] bg-bar-track">
+                          <span
+                            className="block h-full"
+                            style={{
+                              width: `${width.toFixed(1)}%`,
+                              background: RATING_COLORS[r.s.rating],
+                            }}
+                          />
+                        </div>
+                        <span className="text-[12.5px] text-body">
+                          {pct1(r.s.cashOnCashPct)} cash-on-cash return ·{" "}
+                          {pct1(r.s.capRatePct)} cap rate
+                          {r.s.ratingDetail.almost
+                            ? ` · almost ${r.s.ratingDetail.almost}`
+                            : ""}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <div className="flex justify-between gap-3 py-[14px]">
+                    <span className="text-[12.5px] text-body">
+                      Spread, best to worst
+                    </span>
+                    <span className="text-[13px] font-semibold">
+                      {ranked.length > 1
+                        ? `${usdWhole(
+                            ranked[0].s.monthlyCashFlow -
+                              ranked[ranked.length - 1].s.monthlyCashFlow
+                          )}/mo`
+                        : "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {data.marketHealth && (
+              <div className="flex flex-wrap gap-x-6 gap-y-1 border-y border-rule py-3 text-[13px]">
+                <span className="font-semibold">
+                  Market health ({data.marketHealth.countyName})
+                  <InfoTip text="County trajectory: 5-year change from Census ACS plus BLS unemployment. Shrinking population is the classic risk hiding behind cheap, high-cash-flow markets — rents and values erode and vacancies stretch." />
+                </span>
+                {data.marketHealth.populationChangePct5yr != null && (
+                  <span
+                    className={
+                      data.marketHealth.populationChangePct5yr < 0
+                        ? "text-negative"
+                        : ""
+                    }
+                  >
+                    Population{" "}
+                    <b>
+                      {data.marketHealth.populationChangePct5yr >= 0 ? "+" : ""}
+                      {data.marketHealth.populationChangePct5yr.toFixed(1)}%
+                    </b>{" "}
+                    (5 yr
+                    {data.marketHealth.population != null &&
+                      `, now ${data.marketHealth.population.toLocaleString()}`}
+                    )
+                  </span>
+                )}
+                {data.marketHealth.valueChangePct5yr != null && (
+                  <span>
+                    Median value{" "}
+                    <b>
+                      {data.marketHealth.valueChangePct5yr >= 0 ? "+" : ""}
+                      {data.marketHealth.valueChangePct5yr.toFixed(0)}%
+                    </b>{" "}
+                    (5 yr
+                    {data.marketHealth.medianValue != null &&
+                      `, now ${usd(data.marketHealth.medianValue)}`}
+                    )
+                  </span>
+                )}
+                {data.marketHealth.unemploymentPct != null && (
+                  <span
+                    className={
+                      data.marketHealth.unemploymentPct >= 7 ? "text-negative" : ""
+                    }
+                  >
+                    Unemployment{" "}
+                    <b>{data.marketHealth.unemploymentPct.toFixed(1)}%</b>
+                    {data.marketHealth.unemploymentAsOf && (
+                      <span className="text-label">
+                        {" "}
+                        ({data.marketHealth.unemploymentAsOf})
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
+            )}
+
+            <section className="flex flex-col">
+              <SectionHead
+                title="The scenarios"
+                caption="Monthly, after mortgage, taxes, insurance, reserves, management and vacancy"
+              />
+              {ranked.length === 0 && (
+                <p className="max-w-[62ch] py-[18px] font-serif text-[16px] leading-[1.6] text-body">
+                  No scenario can be computed without a rent source. Configure a
+                  data source in the sidebar, or enter a real market rent under{" "}
+                  <b className="font-semibold">Market rent override</b> to
+                  underwrite the long-term case by hand.
+                </p>
+              )}
+              {ranked.map((r) => {
+                const s = r.s;
+                const a = assumptionsFull!;
+                const outflow = s.expenses.totalMonthly + s.monthlyPI;
+                const t = outflow || 1;
+                const insMaint = s.expenses.insurance + s.expenses.maintenance;
+                const vacOrUtil =
+                  r.key === "str" ? s.expenses.other : s.expenses.vacancy;
+                const sub =
+                  r.key === "market"
+                    ? `${usdWhole(s.monthlyRent)}/mo rent · ${
+                        (scenarios!.marketRentSource &&
+                          MARKET_SRC_LABEL[scenarios!.marketRentSource]) ||
+                        "modelled"
+                      }`
+                    : r.key === "s8"
+                      ? `${usdWhole(s.monthlyRent)}/mo rent · Fair Market Rent × ${a.paymentStandardPct}%`
+                      : `${usdWhole(s.monthlyRent)}/mo revenue${
+                          data.mashvisor?.str?.occupancyPct != null
+                            ? ` · ${Math.round(data.mashvisor.str.occupancyPct)}% occ`
+                            : ""
+                        }${
+                          data.mashvisor?.str?.nightlyRate != null
+                            ? ` · ${usdWhole(data.mashvisor.str.nightlyRate)}/night`
+                            : ""
+                        }`;
+                const s8AboveMarket =
+                  r.key === "s8" &&
+                  scenarios?.market != null &&
+                  s.monthlyRent > scenarios.market.monthlyRent * 1.05;
+                return (
+                  <article
+                    key={r.key}
+                    className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-x-7 gap-y-5 border-b border-rule py-5"
+                  >
+                    <div className="flex flex-col gap-[5px]">
+                      <h4 className="font-serif text-[19px] font-medium">
+                        {DISPLAY_LABEL[r.key]}
+                      </h4>
+                      <span className="text-[12px] text-label">{sub}</span>
+                      <span className="mt-[3px] flex items-center gap-[5px]">
+                        <RatingBadge rating={s.rating} />
+                        {s.ratingDetail.almost && (
+                          <AlmostChip almost={s.ratingDetail.almost} />
+                        )}
+                      </span>
+                      <WhyRating s={s} units={a.units} />
+                    </div>
+                    <div className="flex flex-col gap-[14px]">
+                      <div className="flex flex-col gap-[3px]">
+                        <span className="text-[10.5px] font-semibold uppercase tracking-[.1em] text-label">
+                          Monthly cash flow, after the mortgage
+                        </span>
+                        <span
+                          className={`font-serif text-[33px] font-medium leading-none ${cfClass(s.monthlyCashFlow)}`}
+                        >
+                          {signedUsd(s.monthlyCashFlow)}/mo
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-x-4 gap-y-3">
+                        <Metric
+                          label={r.key === "str" ? "Monthly revenue" : "Monthly rent"}
+                          value={`${usdWhole(s.monthlyRent)}/mo`}
+                          tip={
+                            r.key === "str"
+                              ? "Nightly rate multiplied by nights booked, already adjusted for the area's typical occupancy — not a full-occupancy fantasy."
+                              : "What the tenant pays each month, before any expense comes out of it."
+                          }
+                        />
+                        <Metric
+                          label="Cash-on-cash return"
+                          value={pct1(s.cashOnCashPct)}
+                          tip="A year of cash flow divided by the cash you actually put in — down payment, closing costs and rehab. Answers: what does this deal pay on my money?"
+                        />
+                        <Metric
+                          label="Cap rate"
+                          value={pct1(s.capRatePct)}
+                          tip="Capitalization rate: a year of income after operating expenses, divided by the purchase price. It ignores the mortgage, so it compares houses rather than loans."
+                        />
+                        <Metric
+                          label="Gross rent multiple"
+                          value={s.grm.toFixed(1)}
+                          tip="Purchase price divided by one year of rent. Lower is cheaper: 4 means a year's rent covers a quarter of the price, before any expenses."
+                        />
+                        <Metric
+                          label="Net income, yearly"
+                          value={usdWhole(s.noi)}
+                          tip="Net operating income: a year of rent minus operating expenses — taxes, insurance, reserves, management, vacancy — but before any mortgage payment."
+                        />
+                        <Metric
+                          label="Cash invested"
+                          value={usdWhole(s.cashInvested)}
+                          tip="Down payment plus closing costs plus rehab budget — the money that actually leaves your account to buy the house."
+                        />
+                      </div>
+                      <div className="flex flex-col gap-[5px]">
+                        <div className="flex h-2 overflow-hidden rounded-[1px] bg-bar-track">
+                          <span style={{ width: `${((s.monthlyPI / t) * 100).toFixed(1)}%`, background: "#96552a" }} />
+                          <span style={{ width: `${((s.expenses.taxes / t) * 100).toFixed(1)}%`, background: "#b4794c" }} />
+                          <span style={{ width: `${((insMaint / t) * 100).toFixed(1)}%`, background: "#c9a077" }} />
+                          <span style={{ width: `${((s.expenses.management / t) * 100).toFixed(1)}%`, background: "#6b6257" }} />
+                          <span style={{ width: `${(((s.expenses.vacancy + s.expenses.other) / t) * 100).toFixed(1)}%`, background: "#b9b0a2" }} />
+                        </div>
+                        <span className="text-[11.5px] text-label">
+                          {usdWhole(outflow)} leaves each month: mortgage{" "}
+                          {usdWhole(s.monthlyPI)} · property tax{" "}
+                          {usdWhole(s.expenses.taxes)} · insurance and repair
+                          reserve {usdWhole(insMaint)} · management{" "}
+                          {usdWhole(s.expenses.management)} ·{" "}
+                          {r.key === "str"
+                            ? `utilities and supplies ${usdWhole(vacOrUtil)}`
+                            : `empty-months allowance ${usdWhole(vacOrUtil)}`}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <p className="m-0 font-serif text-[14px] leading-[1.6] text-[#4a423a]">
+                        {bandNote(r.key, scenarios!, a, {
+                          occupancyPct: data.mashvisor?.str?.occupancyPct,
+                          revenue: scenarios!.str?.monthlyRent,
+                        })}
+                      </p>
+                      {r.key === "market" &&
+                        scenarios!.marketRentSource === "FMR" && (
+                          <p className="m-0 text-[11.5px] leading-[1.6] text-label">
+                            Rent here is the area-wide HUD Fair Market Rent, not
+                            an estimate for this specific property. In cheaper
+                            submarkets actual rent often runs well below it —
+                            verify with local comps.
+                          </p>
+                        )}
+                      {r.key === "market" &&
+                        scenarios!.marketRentSource === "local ACS median" && (
+                          <p className="m-0 text-[11.5px] leading-[1.6] text-label">
+                            Rent here uses the county&apos;s median rent for this
+                            bedroom count (Census ACS, inflated to current)
+                            because the HUD Fair Market Rent for this area runs
+                            above what local units actually rent for. This is
+                            the conservative estimate; verify with local comps.
+                          </p>
+                        )}
+                      {s8AboveMarket && (
+                        <p className="m-0 border-l-[3px] border-warn bg-accent-tint py-2 pl-3 font-serif text-[13px] leading-[1.6] text-warn-ink">
+                          <b className="font-semibold">
+                            Heads up: this assumes {usdWhole(s.monthlyRent)}/mo —
+                            above the estimated market rent of{" "}
+                            {usdWhole(scenarios!.market!.monthlyRent)}/mo.
+                          </b>{" "}
+                          Housing authorities run a &ldquo;rent
+                          reasonableness&rdquo; check and won&apos;t approve rent
+                          above comparable unassisted units. Call{" "}
+                          {cityLabel
+                            ? `the ${cityLabel} housing authority`
+                            : "the local housing authority"}{" "}
+                          to ask what they&apos;d approve for this specific unit
+                          (
+                          <a
+                            href="https://www.hud.gov/program_offices/public_indian_housing/pha/contacts"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="border-b border-warn/40"
+                          >
+                            HUD PHA directory
+                          </a>
+                          ), or lower the payment standard % for the
+                          conservative case.
+                        </p>
+                      )}
+                      {r.key === "s8" && (
+                        <details className="text-[12.5px]">
+                          <summary className="cursor-pointer text-label">
+                            How the Section 8 numbers work
+                          </summary>
+                          <div className="mt-2 flex flex-col gap-2 text-[12px] leading-[1.6] text-[#4a423a]">
+                            <p>
+                              HUD publishes a <b>Fair Market Rent (FMR)</b> for
+                              every area — the 40th-percentile gross rent, i.e.
+                              what the cheaper 40% of decent units rent for
+                              (ZIP-level &ldquo;Small Area&rdquo; FMR where
+                              available). The local housing authority (PHA) sets
+                              a <b>payment standard</b> between 90% and 120% of
+                              FMR — this card assumes{" "}
+                              <b>{a.paymentStandardPct}%</b>. The voucher covers
+                              the gap between the tenant&apos;s ~30% income
+                              contribution and the approved rent, paid directly
+                              to you.
+                            </p>
+                            <p>
+                              Vacancy defaults to 2% (vs 5% market) because the
+                              voucher portion keeps paying while a tenant stays,
+                              and demand for voucher-ready units is deep.
+                              Offsets: annual PHA inspections, and initial
+                              lease-up takes longer.
+                            </p>
+                            <p>
+                              <b>The number to verify:</b> the PHA won&apos;t
+                              approve rent above comparable unassisted units
+                              nearby (&ldquo;rent reasonableness&rdquo;). In
+                              soft markets FMR can sit far above real market
+                              rent, making this card look better than what the
+                              PHA will actually approve. Call{" "}
+                              {cityLabel
+                                ? `the ${cityLabel} housing authority`
+                                : "the local housing authority"}{" "}
+                              with this specific unit before relying on FMR ×
+                              payment standard —{" "}
+                              <a
+                                href="https://www.hud.gov/program_offices/public_indian_housing/pha/contacts"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="border-b border-accent/30 text-accent"
+                              >
+                                find their contact in HUD&apos;s PHA directory
+                              </a>
+                              .
+                            </p>
+                          </div>
+                        </details>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </section>
+
+            {ranked.length > 0 && (
+              <section className="flex flex-col">
+                <SectionHead title="Line by line" caption="Monthly unless noted" />
+                <div className="grid grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
+                  <span className="border-b border-rule py-[10px]" />
+                  {(["Market rent", "Section 8", "Short-term"] as const).map(
+                    (h, i) => (
+                      <span
+                        key={h}
+                        className={`border-b border-rule py-[10px] text-right text-[12.5px] font-medium ${i === 2 ? "pl-3" : "px-3"}`}
+                      >
+                        {h}
+                      </span>
+                    )
+                  )}
+                  {(() => {
+                    const a = assumptionsFull!;
+                    const cols: (ScenarioResult | null)[] = [
+                      scenarios!.market,
+                      scenarios!.s8,
+                      scenarios!.str,
+                    ];
+                    const cells = (
+                      fn: (s: ScenarioResult, isStr: boolean) => React.ReactNode,
+                      opts?: { emphasis?: boolean; last?: boolean }
+                    ) =>
+                      cols.map((s, i) => (
+                        <span
+                          key={i}
+                          className={`py-[9px] text-right text-[13px] ${
+                            i === 2 ? "pl-3" : "px-3"
+                          } ${
+                            opts?.emphasis
+                              ? "border-b border-ink py-3 text-[15px] font-semibold"
+                              : opts?.last
+                                ? ""
+                                : "border-b border-rule-light"
+                          }`}
+                        >
+                          {s ? fn(s, i === 2) : <span className="text-label">—</span>}
+                        </span>
+                      ));
+                    const label = (
+                      text: string,
+                      opts?: { title?: string; emphasis?: boolean; last?: boolean }
+                    ) => (
+                      <span
+                        title={opts?.title}
+                        className={`py-[9px] text-[13px] text-[#4a423a] ${
+                          opts?.title ? "cursor-help" : ""
+                        } ${
+                          opts?.emphasis
+                            ? "border-b border-ink py-3 text-[13.5px] font-semibold text-ink"
+                            : opts?.last
+                              ? ""
+                              : "border-b border-rule-light"
+                        }`}
+                      >
+                        {text}
+                      </span>
+                    );
+                    return (
+                      <>
+                        {label("Gross income")}
+                        {cells((s) => usdWhole(s.monthlyRent + a.otherMonthlyIncome))}
+                        {label("Mortgage (principal + interest)", {
+                          title:
+                            "Principal and interest on the loan. Taxes and insurance are listed separately below, not escrowed into this figure.",
+                        })}
+                        {cells((s) => usdWhole(s.monthlyPI))}
+                        {label("Taxes, insurance, reserves")}
+                        {cells((s) =>
+                          usdWhole(
+                            s.expenses.taxes +
+                              s.expenses.insurance +
+                              s.expenses.maintenance
+                          )
+                        )}
+                        {label("Management")}
+                        {cells((s) => usdWhole(s.expenses.management))}
+                        {label("Empty-months allowance", {
+                          title:
+                            "Money set aside for the months between tenants, taken as a percentage of rent.",
+                        })}
+                        {cells((s, isStr) =>
+                          isStr ? (
+                            <span className="text-label">already in revenue</span>
+                          ) : (
+                            usdWhole(s.expenses.vacancy)
+                          )
+                        )}
+                        {label("Utilities & supplies")}
+                        {cells((s, isStr) =>
+                          isStr ? (
+                            usdWhole(s.expenses.other)
+                          ) : s.expenses.other > 0 ? (
+                            usdWhole(s.expenses.other)
+                          ) : (
+                            <span className="text-label">tenant pays</span>
+                          )
+                        )}
+                        <span className="border-y border-ink py-3 text-[13.5px] font-semibold">
+                          Cash flow after the mortgage
+                        </span>
+                        {cols.map((s, i) => (
+                          <span
+                            key={i}
+                            className={`border-y border-ink py-3 text-right text-[15px] font-semibold ${
+                              i === 2 ? "pl-3" : "px-3"
+                            } ${s ? cfClass(s.monthlyCashFlow) : "text-label"}`}
+                          >
+                            {s ? signedUsd(s.monthlyCashFlow) : "—"}
+                          </span>
+                        ))}
+                        {label("Cash-on-cash return", {
+                          title:
+                            "A year of cash flow divided by the cash you put in — down payment, closing costs and rehab.",
+                        })}
+                        {cells((s) => pct1(s.cashOnCashPct))}
+                        {label("Cap rate", {
+                          title:
+                            "Capitalization rate: yearly income after operating expenses, divided by the purchase price. Ignores the mortgage.",
+                        })}
+                        {cells((s) => pct1(s.capRatePct))}
+                        {label("Net income, yearly", {
+                          title:
+                            "Net operating income: a year of rent minus operating expenses, before any mortgage payment.",
+                        })}
+                        {cells((s) => usdWhole(s.noi))}
+                        {label("Gross rent multiple", {
+                          title:
+                            "Gross rent multiple: purchase price divided by one year of rent. Lower is cheaper.",
+                          last: true,
+                        })}
+                        {cells((s) => s.grm.toFixed(1), { last: true })}
+                      </>
+                    );
+                  })()}
+                </div>
+              </section>
+            )}
+
+            {outlook && (outlook.stress || outlook.projection) && (
+              <section className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-x-11 gap-y-[34px]">
+                {outlook.stress && (
+                  <div className="flex flex-col">
+                    <SectionHead
+                      title="Stress test"
+                      caption="Market scenario"
+                    />
+                    <div className="flex flex-col">
+                      {outlook.stress.map((row) => (
+                        <div
+                          key={row.label}
+                          className="flex items-baseline justify-between gap-3 border-b border-rule py-[9px]"
+                        >
+                          <span className="text-[13px] text-[#4a423a]">
+                            {row.label}
+                          </span>
+                          <span
+                            className={`text-[13px] font-semibold tabular-nums ${cfClass(row.monthlyCashFlow)}`}
+                          >
+                            {signedUsd(row.monthlyCashFlow)}/mo
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-2 font-serif text-[13px] leading-[1.6] text-[#4a423a]">
+                      Rent −10%, empty months +5 points, rate +1 point — each
+                      alone, then combined. A deal that only works when every
+                      estimate is exactly right isn&apos;t a deal.
+                    </p>
+                  </div>
+                )}
+                {outlook.projection && assumptionsFull && (
+                  <div className="flex flex-col">
+                    <SectionHead
+                      title="5-year hold"
+                      caption="Market scenario, rents held flat"
+                    />
+                    <div className="flex flex-col">
                       {(
                         [
                           [
-                            `Est. value in 5 yrs (${adv.appreciationPctAnnual}%/yr)`,
-                            usd(outlook.projection.futureValue),
+                            `Est. value in 5 yrs (${assumptionsFull.appreciationPctAnnual}%/yr)`,
+                            usdWhole(outlook.projection.futureValue),
                           ],
-                          ["Loan balance then", usd(outlook.projection.loanBalance)],
+                          ["Loan balance then", usdWhole(outlook.projection.loanBalance)],
                           [
                             "Principal paid down by tenant",
-                            usd(outlook.projection.equityPaydown),
+                            usdWhole(outlook.projection.equityPaydown),
                           ],
                           [
                             "Cumulative cash flow (60 mo)",
-                            usd(outlook.projection.cumulativeCashFlow),
+                            usdWhole(outlook.projection.cumulativeCashFlow),
                           ],
                           [
-                            `Net if sold (${adv.sellingCostPct}% selling costs)`,
-                            usd(outlook.projection.netIfSold),
+                            `Net if sold (${assumptionsFull.sellingCostPct}% selling costs)`,
+                            usdWhole(outlook.projection.netIfSold),
                           ],
-                          ["Total profit vs cash in", usd(outlook.projection.totalProfit)],
+                          [
+                            "Total profit vs cash in",
+                            usdWhole(outlook.projection.totalProfit),
+                          ],
                         ] as const
-                      ).map(([label, value]) => (
-                        <tr
-                          key={label}
-                          className="border-b border-zinc-100 dark:border-zinc-800"
+                      ).map(([labelText, value]) => (
+                        <div
+                          key={labelText}
+                          className="flex items-baseline justify-between gap-3 border-b border-rule py-[9px]"
                         >
-                          <td className="py-1.5 text-zinc-600 dark:text-zinc-300">
-                            {label}
-                          </td>
-                          <td className="py-1.5 text-right tabular-nums">{value}</td>
-                        </tr>
+                          <span className="text-[13px] text-[#4a423a]">
+                            {labelText}
+                          </span>
+                          <span className="text-[13px] tabular-nums">{value}</span>
+                        </div>
                       ))}
-                      <tr className="font-semibold">
-                        <td className="py-1.5">
+                      <div className="flex items-baseline justify-between gap-3 py-[9px]">
+                        <span className="flex items-center text-[13.5px] font-semibold">
                           Annualized total return
                           <InfoTip text="The compound annual growth rate on your invested cash if the 5-year projection plays out: (sale proceeds + all cash flow) relative to cash invested, annualized." />
-                        </td>
-                        <td
-                          className={`py-1.5 text-right tabular-nums ${
+                        </span>
+                        <span
+                          className={`text-[15px] font-semibold tabular-nums ${
                             outlook.projection.annualizedReturnPct > 0
-                              ? "text-emerald-600"
-                              : "text-red-600"
+                              ? "text-positive"
+                              : "text-negative"
                           }`}
                         >
                           {outlook.projection.annualizedReturnPct.toFixed(1)}%/yr
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            <section className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-x-11 gap-y-[34px]">
+              <div className="flex flex-col">
+                <h3 className="mb-1 border-b-2 border-ink pb-2 font-serif text-[21px] font-medium">
+                  What the analysis used
+                </h3>
+                {(
+                  [
+                    [
+                      "Market rent baseline",
+                      scenarios?.market
+                        ? `${usdWhole(scenarios.market.monthlyRent)}/mo`
+                        : "unavailable",
+                      scenarios?.market
+                        ? (scenarios.marketRentSource &&
+                            MARKET_SRC_LABEL[scenarios.marketRentSource]) ||
+                          "modelled"
+                        : "no HUD data, no ATTOM key",
+                    ],
+                    [
+                      "Section 8 rent",
+                      scenarios?.s8
+                        ? `${usdWhole(scenarios.s8.monthlyRent)}/mo`
+                        : "unavailable",
+                      scenarios?.s8
+                        ? `${adv.paymentStandardPct}% payment standard`
+                        : "needs HUD FMR",
+                    ],
+                    [
+                      "Airbnb revenue",
+                      scenarios?.str
+                        ? `${usdWhole(scenarios.str.monthlyRent)}/mo`
+                        : "unavailable",
+                      scenarios?.str
+                        ? "occupancy-adjusted, Mashvisor"
+                        : data.mashvisorError
+                          ? "Mashvisor unavailable"
+                          : "no Mashvisor key",
+                    ],
+                    [
+                      "Local median rent",
+                      scenarios?.acsRentForBeds != null
+                        ? `${usdWhole(scenarios.acsRentForBeds)}/mo`
+                        : "unavailable",
+                      scenarios?.acsRentForBeds != null
+                        ? (data.acsRent?.source ?? "Census ACS")
+                        : "needs a free Census key",
+                    ],
+                    [
+                      "Property tax rate",
+                      scenarios ? `${(scenarios.taxRate * 100).toFixed(2)}%/yr` : "—",
+                      scenarios?.taxSource ?? data.tax.source,
+                    ],
+                    [
+                      "Flood zone",
+                      data.flood.zone ? `Zone ${data.flood.zone}` : "none mapped",
+                      data.flood.highRisk
+                        ? "insurance +40% · FEMA flood map"
+                        : data.flood.moderateRisk
+                          ? "insurance +15% · FEMA flood map"
+                          : "no surcharge · FEMA flood map",
+                    ],
+                    [
+                      "Estimated value",
+                      data.attom?.avmValue != null
+                        ? usdWhole(data.attom.avmValue)
+                        : "unavailable",
+                      data.attom?.avmValue != null
+                        ? `automated valuation${
+                            data.attom.avmConfidence != null
+                              ? `, confidence ${data.attom.avmConfidence}/100`
+                              : ""
+                          }`
+                        : data.attomError
+                          ? "ATTOM unavailable"
+                          : "no ATTOM key",
+                    ],
+                    [
+                      "Last sale",
+                      data.attom?.lastSalePrice != null
+                        ? usdWhole(data.attom.lastSalePrice)
+                        : "unavailable",
+                      data.attom?.lastSalePrice != null
+                        ? (data.attom.lastSaleDate?.slice(0, 4) ?? "ATTOM")
+                        : data.attomError
+                          ? "ATTOM unavailable"
+                          : "no ATTOM key",
+                    ],
+                    [
+                      "Cash required",
+                      cashIn != null ? usdWhole(cashIn) : "—",
+                      `${adv.downPaymentPct}% down + ${adv.closingCostPct}% closing${
+                        adv.rehabCost > 0 ? " + rehab" : ""
+                      }`,
+                    ],
+                  ] as [string, string, string][]
+                ).map(([labelText, value, source], i, arr) => (
+                  <div
+                    key={labelText}
+                    className={`flex items-baseline justify-between gap-4 py-[10px] ${
+                      i < arr.length - 1 ? "border-b border-rule" : ""
+                    }`}
+                  >
+                    <span className="text-[13px] text-[#4a423a]">{labelText}</span>
+                    <span className="flex flex-col items-end gap-[1px]">
+                      <b
+                        className={`text-[13px] font-semibold ${
+                          value === "unavailable" ? "font-normal text-disabled" : ""
+                        }`}
+                      >
+                        {value}
+                      </b>
+                      <span className="text-right text-[12px] text-label">
+                        {source}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+                {divergePct != null && divergePct > 0 && (
+                  <div className="mt-4 border-l-[3px] border-warn bg-accent-tint py-[10px] pl-[14px]">
+                    <p className="m-0 font-serif text-[14px] leading-[1.6] text-warn-ink">
+                      <b className="font-semibold">Verify the market rent.</b>{" "}
+                      ATTOM&apos;s model says {usdWhole(data.attom!.rentalAvm!)}
+                      /mo, HUD says {usdWhole(scenarios!.fmrRent!)}/mo —{" "}
+                      {divergePct.toFixed(0)}% apart. Both are estimates; one
+                      real comp settles it. Section 8 keys off FMR either way.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <FidelityCheck
+                data={data}
+                scenarios={scenarios}
+                price={price === "" ? 0 : Number(price)}
+                bedrooms={bedrooms === "" ? 3 : Number(bedrooms)}
+                mashvisorConfigured={sources?.mashvisor ?? false}
+              />
+            </section>
+
+            {savedPins.length > 0 && (
+              <section className="flex flex-col gap-[14px]">
+                <div className="flex flex-wrap items-baseline justify-between gap-[14px] border-b-2 border-ink pb-2">
+                  <h3 className="font-serif text-[21px] font-medium">
+                    Deal map{" "}
+                    <span className="text-[13px] font-normal text-label">
+                      {visiblePins.length} of {savedPins.length} shown
+                    </span>
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11.5px] text-label">Color by</span>
+                      <div className="flex gap-[14px]">
+                        {(
+                          [
+                            ["market", "Market"],
+                            ["s8", "Section 8"],
+                            ["str", "Airbnb"],
+                          ] as const
+                        ).map(([key, labelText]) => (
+                          <button
+                            key={key}
+                            onClick={() => setColorBy(key)}
+                            className={`cursor-pointer pb-[1px] text-[12px] ${
+                              colorBy === key
+                                ? "border-b-2 border-accent text-ink"
+                                : "border-b border-transparent text-label"
+                            }`}
+                          >
+                            {labelText}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11.5px] text-[#4a423a]">
+                      {ALL_RATINGS.map((r) => {
+                        const on = ratingFilter.has(r);
+                        return (
+                          <button
+                            key={r}
+                            title={`${on ? "Hide" : "Show"} ${r} deals`}
+                            onClick={() =>
+                              setRatingFilter((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(r)) next.delete(r);
+                                else next.add(r);
+                                return next;
+                              })
+                            }
+                            className={`flex cursor-pointer items-center gap-[5px] ${
+                              on ? "" : "opacity-35"
+                            }`}
+                          >
+                            <span
+                              className="h-2 w-2 rounded-full"
+                              style={{ background: RATING_COLORS[r] }}
+                            />
+                            {r}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
 
-          {(data.mashvisor != null || data.mashvisorError != null) && (
-            <MashvisorCompare
-              data={data}
-              scenarios={scenarios}
-              price={price === "" ? 0 : Number(price)}
-              bedrooms={bedrooms === "" ? 3 : Number(bedrooms)}
-            />
-          )}
+                <PropertyMap
+                  pins={visiblePins}
+                  colorBy={colorBy}
+                  focusId={focusId}
+                />
 
-          <p className="text-xs text-zinc-400 dark:text-zinc-500">
-            Ratings (per unit): <b>Rare</b> ≥ $400/mo cash flow, ≥12% CoC, ≥8% cap ·{" "}
-            <b>Fantastic</b> ≥ $250/mo, ≥10% CoC · <b>Great</b> ≥ $150/mo, ≥8% CoC ·{" "}
-            <b>Good</b> &gt; $50/mo, ≥5% CoC · <b>Poor</b> otherwise (break-even is
-            not a goal). A dashed <b>Almost</b> badge means the deal misses the
-            next tier by a rounding error — within $50/mo cash flow, 1.5% CoC, or
-            1% cap rate — and the exact shortfall is shown, since $13/mo shouldn&apos;t
-            disqualify a purchase. On the map, near-miss pins wear a ring in the
-            next tier&apos;s color. All figures are estimates from public data (HUD FMR, FEMA
-            NFHL, Census, statewide tax averages, plus ATTOM property records
-            when configured) — verify with local comps, actual tax bills and
-            insurance quotes before offering. Not professional advice.
-          </p>
-        </section>
-      )}
-
-      {savedPins.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <h2 className="text-lg font-bold">
-              Deal Map{" "}
-              <span className="text-sm font-normal text-zinc-500">
-                ({visiblePins.length} of {savedPins.length})
-              </span>
-            </h2>
-            <div className="flex items-center gap-1 text-sm">
-              <span className="text-zinc-500 mr-1">Color by:</span>
-              {(
-                [
-                  ["market", "Market"],
-                  ["s8", "Section 8"],
-                  ["str", "Airbnb"],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => setColorBy(key)}
-                  className={`rounded-md px-2.5 py-1 border ${
-                    colorBy === key
-                      ? "bg-emerald-600 border-emerald-600 text-white font-semibold"
-                      : "border-zinc-300 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-3 text-sm">
-              {ALL_RATINGS.map((r) => (
-                <label key={r} className="flex items-center gap-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={ratingFilter.has(r)}
-                    onChange={() =>
-                      setRatingFilter((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(r)) next.delete(r);
-                        else next.add(r);
-                        return next;
-                      })
-                    }
-                  />
-                  <span
-                    className="inline-block h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: RATING_COLORS[r] }}
-                  />
-                  {r}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <PropertyMap pins={visiblePins} colorBy={colorBy} focusId={focusId} />
-
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
-                <th className="py-1.5 font-medium">Property</th>
-                <th className="py-1.5 font-medium text-right">Price</th>
-                <th className="py-1.5 font-medium text-right">Market CF/mo</th>
-                <th className="py-1.5 font-medium text-right">Sec. 8 CF/mo</th>
-                <th className="py-1.5 font-medium text-right">Airbnb CF/mo</th>
-                <th className="py-1.5 font-medium text-center">Rating</th>
-                <th className="py-1.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {[...visiblePins]
-                .sort(
-                  (a, b) =>
-                    ((b[colorBy] ?? b.market ?? b.s8 ?? b.str)?.monthlyCashFlow ?? 0) -
-                    ((a[colorBy] ?? a.market ?? a.s8 ?? a.str)?.monthlyCashFlow ?? 0)
-                )
-                .map((p) => {
-                  const m = p[colorBy] ?? p.market ?? p.s8 ?? p.str;
-                  return (
-                    <tr
-                      key={p.id}
-                      onClick={() => setFocusId(p.id)}
-                      className="border-b border-zinc-100 dark:border-zinc-800/60 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900"
-                    >
-                      <td className="py-1.5">{p.address}</td>
-                      <td className="py-1.5 text-right tabular-nums">{usd(p.price)}</td>
-                      <td
-                        className={`py-1.5 text-right tabular-nums font-semibold ${
-                          (p.market?.monthlyCashFlow ?? 0) > 0
-                            ? "text-emerald-600"
-                            : "text-red-600"
+                <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1.2fr_28px]">
+                  {["Property", "Price", "Market", "Sec. 8", "Airbnb", "Best play", ""].map(
+                    (h, i) => (
+                      <span
+                        key={h || "x"}
+                        className={`border-b border-ink py-[9px] text-[10.5px] font-semibold uppercase tracking-[.11em] text-label ${
+                          i >= 1 && i <= 4 ? "px-3 text-right" : i === 5 ? "pl-3" : ""
                         }`}
                       >
-                        {p.market ? usd(p.market.monthlyCashFlow) : "—"}
-                      </td>
-                      <td
-                        className={`py-1.5 text-right tabular-nums font-semibold ${
-                          (p.s8?.monthlyCashFlow ?? 0) > 0
-                            ? "text-emerald-600"
-                            : "text-red-600"
-                        }`}
-                      >
-                        {p.s8 ? usd(p.s8.monthlyCashFlow) : "—"}
-                      </td>
-                      <td
-                        className={`py-1.5 text-right tabular-nums font-semibold ${
-                          (p.str?.monthlyCashFlow ?? 0) > 0
-                            ? "text-emerald-600"
-                            : "text-red-600"
-                        }`}
-                      >
-                        {p.str ? usd(p.str.monthlyCashFlow) : "—"}
-                      </td>
-                      <td className="py-1.5 text-center">
-                        {m && <RatingBadge rating={m.rating} almost={m.almost} />}
-                      </td>
-                      <td className="py-1.5 text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSavedPins((prev) =>
-                              prev.filter((x) => x.id !== p.id)
-                            );
-                            if (focusId === p.id) setFocusId(null);
-                          }}
-                          className="text-zinc-400 hover:text-red-600 px-1"
-                          title="Remove from map"
+                        {h}
+                      </span>
+                    )
+                  )}
+                  {[...visiblePins]
+                    .sort(
+                      (a, b) =>
+                        ((b[colorBy] ?? b.market ?? b.s8 ?? b.str)?.monthlyCashFlow ?? 0) -
+                        ((a[colorBy] ?? a.market ?? a.s8 ?? a.str)?.monthlyCashFlow ?? 0)
+                    )
+                    .map((p) => {
+                      const m = p[colorBy] ?? p.market ?? p.s8 ?? p.str;
+                      const plays: [string, PinMetrics | undefined][] = [
+                        ["Market rent", p.market],
+                        ["Section 8", p.s8],
+                        ["Short-term rental", p.str],
+                      ];
+                      let play = "—";
+                      let playCf = -Infinity;
+                      for (const [pl, pm] of plays) {
+                        if (pm && pm.monthlyCashFlow > playCf) {
+                          playCf = pm.monthlyCashFlow;
+                          play = pl;
+                        }
+                      }
+                      const cell = (
+                        metric: PinMetrics | undefined,
+                        key: ScenarioKey
+                      ) => (
+                        <span
+                          className={`cursor-pointer border-b border-rule px-3 py-[11px] text-right text-[13px] tabular-nums ${
+                            colorBy === key ? "font-semibold" : ""
+                          } ${metric ? cfClass(metric.monthlyCashFlow) : "text-label"}`}
+                          onClick={() => setFocusId(p.id)}
                         >
-                          ✕
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
-        </section>
-      )}
-    </main>
+                          {metric ? signedUsd(metric.monthlyCashFlow) : "—"}
+                        </span>
+                      );
+                      return (
+                        <span key={p.id} className="contents">
+                          <span
+                            onClick={() => setFocusId(p.id)}
+                            className="flex cursor-pointer items-center gap-[9px] border-b border-rule py-[11px] text-[13px] hover:bg-accent-tint"
+                          >
+                            <span
+                              className="h-2 w-2 shrink-0 rounded-full"
+                              style={{
+                                background: m ? RATING_COLORS[m.rating] : "#6b6257",
+                              }}
+                            />
+                            <span className="truncate">{p.address}</span>
+                          </span>
+                          <span
+                            onClick={() => setFocusId(p.id)}
+                            className="cursor-pointer border-b border-rule px-3 py-[11px] text-right text-[13px] text-[#4a423a] tabular-nums"
+                          >
+                            {usd(p.price)}
+                          </span>
+                          {cell(p.market, "market")}
+                          {cell(p.s8, "s8")}
+                          {cell(p.str, "str")}
+                          <span className="flex items-center gap-[7px] border-b border-rule py-[11px] pl-3 text-[12px]">
+                            <span className="text-[#4a423a]">{play}</span>
+                            {m && <RatingBadge rating={m.rating} small />}
+                            {m?.almost && (
+                              <span
+                                title={
+                                  m.gapText
+                                    ? `${m.gapText} away from ${m.almost}`
+                                    : `almost ${m.almost}`
+                                }
+                                className="text-[10px]"
+                                style={{ color: RATING_COLORS[m.almost] }}
+                              >
+                                almost {m.almost}
+                              </span>
+                            )}
+                          </span>
+                          <span className="flex items-center justify-end border-b border-rule py-[11px]">
+                            <button
+                              onClick={() => {
+                                setSavedPins((prev) =>
+                                  prev.filter((x) => x.id !== p.id)
+                                );
+                                if (focusId === p.id) setFocusId(null);
+                              }}
+                              title="Remove from map"
+                              className="cursor-pointer px-1 text-label hover:text-negative"
+                            >
+                              ✕
+                            </button>
+                          </span>
+                        </span>
+                      );
+                    })}
+                </div>
+              </section>
+            )}
+
+            <p className="m-0 max-w-[96ch] border-t border-rule pt-4 text-[11.5px] leading-[1.75] text-label">
+              Ratings are per unit, measured on monthly cash flow after the
+              mortgage and cash-on-cash return.{" "}
+              <b className="font-semibold text-body">Rare</b> ≥ $400/mo, ≥12%
+              cash-on-cash, ≥8% cap rate ·{" "}
+              <b className="font-semibold text-body">Fantastic</b> ≥ $250/mo,
+              ≥10% cash-on-cash ·{" "}
+              <b className="font-semibold text-body">Great</b> ≥ $150/mo, ≥8%
+              cash-on-cash · <b className="font-semibold text-body">Good</b>{" "}
+              &gt; $50/mo, ≥5% cash-on-cash ·{" "}
+              <b className="font-semibold text-body">Poor</b> otherwise —
+              breaking even is not a goal. A dashed{" "}
+              <b className="font-semibold text-body">Almost</b> badge means the
+              deal misses the next tier by less than $50/mo, 1.5 points of
+              cash-on-cash or 1 point of cap rate. All figures are estimates
+              from public data — HUD Fair Market Rents, FEMA flood maps, the
+              Census geocoder, Census county data (taxes, rents, vacancy,
+              population), BLS unemployment and the FRED mortgage average —
+              plus ATTOM property records and Mashvisor short-term data where a
+              key is configured. Verify rents with local comparable rentals,
+              taxes with the county auditor and insurance with real quotes
+              before making an offer. Not professional advice.
+            </p>
+          </section>
+        )}
+      </main>
+    </div>
   );
 }

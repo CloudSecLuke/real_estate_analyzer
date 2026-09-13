@@ -165,60 +165,59 @@ export default function BatchImport({
   }
 
   return (
-    <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 flex flex-col gap-2 text-sm">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="font-semibold">Batch import</span>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".csv,text/csv"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) runBatch(f);
-            e.target.value = "";
-          }}
-        />
+    <div className="flex flex-col gap-2">
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) runBatch(f);
+          e.target.value = "";
+        }}
+      />
+      <p className="text-[11.5px] leading-[1.6] text-label">
+        Or{" "}
         <button
           type="button"
           disabled={progress !== null}
           onClick={() => fileRef.current?.click()}
-          className="rounded-md border border-emerald-600 text-emerald-700 dark:text-emerald-400 px-3 py-1 font-semibold disabled:opacity-50"
+          className="cursor-pointer border-b border-accent/30 text-accent hover:text-link-hover disabled:opacity-60"
         >
-          {progress ? "Importing…" : "Upload CSV"}
-        </button>
+          {progress ? "importing…" : "upload a CSV"}
+        </button>{" "}
+        to underwrite a whole list at once (
         <a
           href="/sample-batch.csv"
           download
-          className="text-emerald-700 dark:text-emerald-400 underline"
+          className="border-b border-accent/30 text-accent hover:text-link-hover"
         >
-          sample CSV
+          sample
         </a>
-        <span className="text-zinc-500">
-          Columns: address (required), price, bedrooms, rent — header row
-          optional; missing values fall back to the form above.
-        </span>
-      </div>
+        ). Columns: address, price, bedrooms, rent — missing values fall back
+        to the form above.
+      </p>
 
       {progress && (
-        <div className="flex items-center gap-3">
-          <div className="h-2 flex-1 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
+        <div className="flex items-center gap-2 text-[11px] text-label">
+          <div className="h-[6px] flex-1 overflow-hidden rounded-[1px] bg-bar-track">
             <div
-              className="h-full bg-emerald-600 transition-all"
+              className="h-full bg-accent transition-all"
               style={{ width: `${(progress.done / progress.total) * 100}%` }}
             />
           </div>
-          <span className="tabular-nums text-zinc-500 whitespace-nowrap">
+          <span className="whitespace-nowrap tabular-nums">
             {progress.done}/{progress.total}
           </span>
-          <span className="text-zinc-400 truncate max-w-[280px]">{current}</span>
+          <span className="max-w-[120px] truncate">{current}</span>
         </div>
       )}
 
-      {summary && <div className="text-emerald-700 dark:text-emerald-400">{summary}</div>}
+      {summary && <div className="text-[11.5px] text-positive">{summary}</div>}
 
       {errors.length > 0 && (
-        <ul className="text-red-600 dark:text-red-400 list-disc pl-5">
+        <ul className="list-disc pl-4 text-[11.5px] text-negative">
           {errors.map((e, i) => (
             <li key={i}>
               <b>{e.address}</b>: {e.error}

@@ -272,10 +272,12 @@ export function projectFiveYears(
   };
 }
 
+// Warm re-tint from the UI redesign — map pins, badges and popups all read
+// from this single palette.
 export const RATING_COLORS: Record<Rating, string> = {
-  Rare: "#7c3aed",
-  Fantastic: "#059669",
-  Great: "#16a34a",
-  Good: "#ca8a04",
-  Poor: "#dc2626",
+  Rare: "#6b4fa8",
+  Fantastic: "#2f6b4f",
+  Great: "#4a7a52",
+  Good: "#8c5b10",
+  Poor: "#a33a2b",
 };

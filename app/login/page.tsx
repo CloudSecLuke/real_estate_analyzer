@@ -30,20 +30,27 @@ export default function LoginPage() {
     }
   }
 
+  const input =
+    "w-full rounded-[2px] border border-input-border bg-field px-[10px] py-[9px] text-[13px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(150,85,42,.1)]";
+
   return (
-    <main className="min-h-dvh flex items-center justify-center px-4">
+    <main className="flex min-h-dvh items-center justify-center bg-paper px-4">
       <form
         onSubmit={submit}
-        className="w-full max-w-sm rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 flex flex-col gap-4"
+        className="flex w-full max-w-sm flex-col gap-4 border border-rule bg-sidebar p-7"
       >
-        <div>
-          <h1 className="text-xl font-bold">Real Estate Cash Flow Analyzer</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+        <div className="border-b-2 border-ink pb-3">
+          <h1 className="font-serif text-[23px] font-medium leading-[1.2]">
+            Rental Cash Flow Analyzer
+          </h1>
+          <p className="mt-1 text-[12.5px] leading-[1.6] text-body">
             Sign in to continue.
           </p>
         </div>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-zinc-500 dark:text-zinc-400">Username</span>
+        <label className="flex flex-col gap-[5px]">
+          <span className="text-[10.5px] font-semibold uppercase tracking-[.11em] text-label">
+            Username
+          </span>
           <input
             required
             autoFocus
@@ -51,29 +58,31 @@ export default function LoginPage() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="first.last"
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5"
+            className={input}
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-zinc-500 dark:text-zinc-400">Password</span>
+        <label className="flex flex-col gap-[5px]">
+          <span className="text-[10.5px] font-semibold uppercase tracking-[.11em] text-label">
+            Password
+          </span>
           <input
             required
             type="password"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5"
+            className={input}
           />
         </label>
         {error && (
-          <div className="rounded-md border border-red-300 bg-red-50 dark:bg-red-950 dark:border-red-800 text-red-700 dark:text-red-300 px-3 py-2 text-sm">
+          <div className="border-l-[3px] border-negative bg-accent-tint px-3 py-2 text-[12.5px] text-warn-ink">
             {error}
           </div>
         )}
         <button
           type="submit"
           disabled={loading}
-          className="rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold px-4 py-2"
+          className="cursor-pointer rounded-[2px] bg-accent px-4 py-[11px] text-[13px] font-semibold text-field hover:bg-accent-hover disabled:opacity-60"
         >
           {loading ? "Signing in…" : "Sign in"}
         </button>
