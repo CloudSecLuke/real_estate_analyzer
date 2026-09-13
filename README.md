@@ -39,7 +39,8 @@ table (jsonb) in Neon Postgres, saved with a debounce from the client.
 | [Census Bureau Geocoder](https://geocoding.geo.census.gov/) | Address validation, lat/lon, county FIPS | None |
 | [HUD FMR API](https://www.huduser.gov/portal/dataset/fmr-api.html) | Fair Market Rents (county + Small Area by ZIP) | Free token |
 | [FEMA NFHL](https://hazards.fema.gov/) | Flood zone at the property location | None |
-| Embedded statewide tax table | Effective property tax rate fallback | None |
+| [Census ACS](https://api.census.gov/) | County-level effective tax rate (median tax bill ÷ median value) | Free key |
+| Embedded statewide tax table | Tax-rate fallback when no Census key | None |
 | [ATTOM Data](https://api.developer.attomdata.com/) *(optional)* | Beds/baths/sqft, **actual tax bill**, value AVM, rental AVM, sale history | Free trial, paid after |
 | [Mashvisor](https://www.mashvisor.com/api-doc-v2) *(optional)* | Airbnb occupancy/nightly rate/revenue, rental comps, market historicals, ML deal score | Paid ($129/mo) |
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { geocodeAddress } from "@/lib/geocode";
 import { getFmr } from "@/lib/hud";
 import { getFloodZone } from "@/lib/fema";
-import { estimateTaxRate } from "@/lib/tax";
+import { estimateTaxRateForCounty } from "@/lib/tax";
 import { getAttomData } from "@/lib/attom";
 import { getMashvisorAnalyze } from "@/lib/mashvisor";
 import type {
@@ -38,10 +38,15 @@ export async function POST(req: NextRequest) {
     let attomError: string | undefined;
     let mashvisor: MashvisorData | null = null;
     let mashvisorError: string | undefined;
-    const [fmrResult, flood, attomResult, mashvisorResult] = await Promise.all([
+    const [fmrResult, flood, attomResult, tax, mashvisorResult] = await Promise.all([
       getFmr(property.countyFips, property.zip).catch((e: Error) => e),
       getFloodZone(property.lat, property.lon),
       getAttomData(property.matchedAddress).catch((e: Error) => e),
+      estimateTaxRateForCounty(
+        property.countyFips,
+        property.state,
+        property.countyName
+      ),
       getMashvisorAnalyze({
         state: property.state,
         city,
@@ -66,8 +71,6 @@ export async function POST(req: NextRequest) {
     } else {
       mashvisor = mashvisorResult;
     }
-
-    const tax = estimateTaxRate(property.state);
 
     const payload: AnalyzeResponse = {
       property,

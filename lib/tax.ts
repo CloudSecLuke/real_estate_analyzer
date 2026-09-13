@@ -30,3 +30,48 @@ export function estimateTaxRate(state: string): TaxEstimate {
   }
   return { effectiveRate: DEFAULT_RATE, source: "U.S. average (state unknown)" };
 }
+
+// County-level effective rate from Census ACS 5-year medians: median real
+// estate taxes paid (B25103) ÷ median home value (B25077). The data API
+// needs a free key (api.census.gov/data/key_signup.html) — without one,
+// or on any failure, fall back to the statewide table above.
+const ACS_URL = "https://api.census.gov/data/2023/acs/acs5";
+
+export async function estimateTaxRateForCounty(
+  countyFips: string,
+  state: string,
+  countyName: string
+): Promise<TaxEstimate> {
+  const key = process.env.CENSUS_API_KEY;
+  if (key && /^\d{5}$/.test(countyFips)) {
+    try {
+      const params = new URLSearchParams({
+        get: "B25103_001E,B25077_001E",
+        for: `county:${countyFips.slice(2)}`,
+        in: `state:${countyFips.slice(0, 2)}`,
+        key,
+      });
+      const res = await fetch(`${ACS_URL}?${params}`, {
+        next: { revalidate: 2592000 }, // county medians move yearly at most
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const taxes = Number(json?.[1]?.[0]);
+        const value = Number(json?.[1]?.[1]);
+        if (taxes > 0 && value > 0) {
+          const rate = taxes / value;
+          // sanity band: reject junk (ACS uses negative sentinels for N/A)
+          if (rate > 0.001 && rate < 0.06) {
+            return {
+              effectiveRate: rate,
+              source: `${countyName} median effective rate (Census ACS)`,
+            };
+          }
+        }
+      }
+    } catch {
+      // fall through to statewide
+    }
+  }
+  return estimateTaxRate(state);
+}
