@@ -9,10 +9,12 @@ import {
 export async function POST(req: NextRequest) {
   let username = "";
   let password = "";
+  let remember = true;
   try {
     const body = await req.json();
     username = String(body.username ?? "").trim().toLowerCase();
     password = String(body.password ?? "");
+    remember = body.remember !== false;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -30,7 +32,8 @@ export async function POST(req: NextRequest) {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: SESSION_MAX_AGE,
+    // "Keep me signed in" unchecked → session cookie (gone on browser close)
+    ...(remember ? { maxAge: SESSION_MAX_AGE } : {}),
   });
   return res;
 }

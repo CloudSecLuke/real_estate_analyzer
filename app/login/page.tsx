@@ -1,92 +1,318 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { AppMarkInverted } from "@/components/PencilMark";
+import { tierForLegacyRating, tierForScore } from "@/lib/pencilScore";
+import type { HistoryEntry, PinMetrics, SavedPin } from "@/lib/types";
+
+const signed = (n: number) =>
+  (n >= 0 ? "+" : "−") + "$" + Math.abs(Math.round(n)).toLocaleString("en-US");
+const usd = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
+
+interface LastPenciled {
+  address: string;
+  score: number | null;
+  tierLabel: string;
+  tierBg: string;
+  tierFg: string;
+  cashFlow: number;
+  maxBuy: number | null;
+  coc: number;
+}
+
+// The "Last penciled" card is populated from this browser's most recent
+// analysis (localStorage), and hidden entirely for a first-time visitor —
+// never placeholder numbers.
+function readLastPenciled(): LastPenciled | null {
+  try {
+    const hist: HistoryEntry[] = JSON.parse(
+      localStorage.getItem("rea_history_v1") ?? "[]"
+    );
+    const pins: SavedPin[] = JSON.parse(
+      localStorage.getItem("rea_saved_pins_v1") ?? "[]"
+    );
+    const last = hist[0];
+    if (!last) return null;
+    const pin = pins.find(
+      (p) => p.address.toLowerCase() === last.address.toLowerCase()
+    );
+    if (!pin) return null;
+    const metrics = [pin.market, pin.s8, pin.str].filter(
+      (m): m is PinMetrics => Boolean(m)
+    );
+    if (metrics.length === 0) return null;
+    const best = metrics.reduce((a, b) =>
+      b.monthlyCashFlow > a.monthlyCashFlow ? b : a
+    );
+    const tier =
+      best.score != null
+        ? tierForScore(best.score)
+        : tierForLegacyRating(best.rating);
+    return {
+      address: pin.address,
+      score: best.score ?? null,
+      tierLabel: tier.label,
+      tierBg: tier.bg,
+      tierFg: tier.fg,
+      cashFlow: best.monthlyCashFlow,
+      maxBuy: pin.investorValue ?? null,
+      coc: best.cashOnCashPct,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const INPUT =
+  "w-full rounded-[7px] border border-input-border bg-card px-[13px] py-3 text-[14.5px] text-ink outline-none focus:border-ink focus:shadow-[0_0_0_3px_rgba(244,197,66,.45)]";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [reveal, setReveal] = useState(false);
+  const [remember, setRemember] = useState(true);
+  const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [last, setLast] = useState<LastPenciled | null>(null);
+  const [nextUrl, setNextUrl] = useState("/app");
+  const [betaNote, setBetaNote] = useState(false);
+
+  useEffect(() => {
+    setLast(readLastPenciled());
+    const params = new URLSearchParams(window.location.search);
+    const next = params.get("next");
+    if (next && next.startsWith("/")) setNextUrl(next);
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
-    setError(null);
+    setError(false);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, remember }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Sign-in failed");
-      router.replace("/");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign-in failed");
+      if (!res.ok) throw new Error("bad credentials");
+      window.location.href = nextUrl;
+    } catch {
+      setError(true);
       setLoading(false);
     }
   }
 
-  const input =
-    "w-full rounded-[2px] border border-input-border bg-field px-[10px] py-[9px] text-[13px] text-ink outline-none focus:border-accent focus:shadow-[0_0_0_3px_rgba(150,85,42,.1)]";
-
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-paper px-4">
-      <form
-        onSubmit={submit}
-        className="flex w-full max-w-sm flex-col gap-4 border border-rule bg-sidebar p-7"
-      >
-        <div className="border-b-2 border-ink pb-3">
-          <h1 className="font-serif text-[23px] font-medium leading-[1.2]">
-            Rental Cash Flow Analyzer
+    <div className="grid min-h-screen grid-cols-[repeat(auto-fit,minmax(400px,1fr))] max-[420px]:grid-cols-1">
+      <section className="flex min-h-full flex-col justify-between gap-12 bg-ink-panel px-12 py-11 max-md:px-6">
+        <Link href="/" className="flex items-center gap-[11px] self-start">
+          <AppMarkInverted />
+          <span className="flex flex-col gap-[3px]">
+            <span className="text-[19px] font-extrabold leading-none tracking-[-.032em] text-on-dark">
+              PropPencil
+            </span>
+            <span className="block h-[3px] w-[70px] rounded-[2px] bg-pencil" />
+          </span>
+        </Link>
+
+        <div className="flex max-w-[46ch] flex-col gap-5">
+          <h1 className="text-[52px] font-extrabold leading-none tracking-[-.045em] text-on-dark max-md:text-[38px]">
+            Does it pencil?
           </h1>
-          <p className="mt-1 text-[12.5px] leading-[1.6] text-body">
-            Sign in to continue.
+          <p className="text-[16.5px] leading-[1.6] text-on-dark-dim [text-wrap:pretty]">
+            Sign in to pick up where you left off — your saved properties,
+            your assumptions, and the return you require.
+          </p>
+
+          {last && (
+            <div className="mt-[6px] flex flex-col gap-px overflow-hidden rounded-[10px] border border-[#2e2e2b] bg-[#2e2e2b]">
+              <div className="flex items-center justify-between gap-4 bg-[#1f1f1d] px-[18px] py-4">
+                <div className="flex min-w-0 flex-col gap-[2px]">
+                  <span className="text-[10.5px] font-bold uppercase tracking-[.12em] text-disabled">
+                    Last penciled
+                  </span>
+                  <span className="truncate text-[14px] font-semibold text-on-dark">
+                    {last.address}
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-[9px]">
+                  {last.score != null && (
+                    <span className="text-[26px] font-extrabold tracking-[-.035em] text-on-dark tabular-nums">
+                      {last.score}
+                    </span>
+                  )}
+                  <span
+                    className="whitespace-nowrap rounded-[5px] px-[9px] py-[3px] text-[10px] font-bold uppercase tracking-[.05em]"
+                    style={{ backgroundColor: last.tierBg, color: last.tierFg }}
+                  >
+                    {last.tierLabel}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-5 bg-[#1f1f1d] px-[18px] py-[14px]">
+                <div className="flex flex-col gap-[2px]">
+                  <span className="text-[10px] font-bold uppercase tracking-[.1em] text-disabled">
+                    Cash flow
+                  </span>
+                  <span className="text-[15px] font-bold text-[#7ddba8] tabular-nums">
+                    {signed(last.cashFlow)}/mo
+                  </span>
+                </div>
+                {last.maxBuy != null && (
+                  <div className="flex flex-col gap-[2px]">
+                    <span className="text-[10px] font-bold uppercase tracking-[.1em] text-disabled">
+                      Max buy price
+                    </span>
+                    <span className="text-[15px] font-bold text-pencil tabular-nums">
+                      {usd(last.maxBuy)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex flex-col gap-[2px]">
+                  <span className="text-[10px] font-bold uppercase tracking-[.1em] text-disabled">
+                    Cash-on-cash
+                  </span>
+                  <span className="text-[15px] font-bold text-on-dark tabular-nums">
+                    {last.coc.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <p className="max-w-[60ch] text-[12px] leading-[1.65] text-disabled">
+          PropPencil estimates from public data. Verify rents, taxes and
+          insurance before making an offer. Not professional advice.
+        </p>
+      </section>
+
+      <section className="flex items-center justify-center px-8 py-12 max-md:px-5">
+        <div className="flex w-full max-w-[392px] flex-col gap-[22px]">
+          <div className="flex flex-col gap-[7px]">
+            <h2 className="text-[29px] font-extrabold leading-[1.1] tracking-[-.032em]">
+              Welcome back
+            </h2>
+            <p className="text-[14px] text-label">Sign in to continue.</p>
+          </div>
+
+          {error && (
+            <div className="flex gap-[11px] rounded-[8px] border border-[#e6c4bf] border-l-4 border-l-negative bg-[#f7ece9] px-[14px] py-3">
+              <p className="text-[13px] leading-[1.55] text-[#7a1f17]">
+                <b className="font-bold">
+                  That username and password do not match.
+                </b>{" "}
+                Check for a stray capital, or reset your password below.
+              </p>
+            </div>
+          )}
+
+          <form onSubmit={submit} className="flex flex-col gap-[15px]">
+            <label className="flex flex-col gap-[6px]">
+              <span className="text-[11px] font-bold uppercase tracking-[.1em] text-label">
+                Username
+              </span>
+              <input
+                required
+                autoFocus
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                placeholder="first.last"
+                className={INPUT}
+              />
+            </label>
+
+            <label className="flex flex-col gap-[6px]">
+              <span className="flex items-baseline justify-between gap-[10px]">
+                <span className="text-[11px] font-bold uppercase tracking-[.1em] text-label">
+                  Password
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setReveal((r) => !r)}
+                  className="cursor-pointer text-[11.5px] font-semibold text-accent hover:text-link-hover"
+                >
+                  {reveal ? "Hide" : "Show"}
+                </button>
+              </span>
+              <input
+                required
+                type={reveal ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                className={INPUT}
+              />
+            </label>
+
+            <div className="flex flex-wrap items-center justify-between gap-[10px]">
+              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-body">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                  className="h-[15px] w-[15px] cursor-pointer accent-ink"
+                />
+                <span>Keep me signed in</span>
+              </label>
+              <a
+                href="mailto:luke.f.miller.8@gmail.com?subject=PropPencil%20password%20reset"
+                className="text-[13px] font-semibold text-accent hover:text-link-hover"
+              >
+                Forgot password?
+              </a>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-[2px] w-full cursor-pointer rounded-[7px] bg-pencil px-4 py-[13px] text-[15px] font-extrabold tracking-[-.01em] text-ink hover:bg-pencil-dark disabled:opacity-60"
+            >
+              {loading ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
+
+          <div className="flex items-center gap-3">
+            <span className="h-px flex-1 bg-border" />
+            <span className="text-[11px] font-bold uppercase tracking-[.1em] text-label">
+              Or
+            </span>
+            <span className="h-px flex-1 bg-border" />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setBetaNote(true)}
+            className="w-full cursor-pointer rounded-[7px] border border-input-border bg-card px-4 py-3 text-[14px] font-semibold text-ink hover:border-ink"
+          >
+            Pencil a property without an account
+          </button>
+          {betaNote && (
+            <p className="text-[12.5px] leading-[1.6] text-label">
+              PropPencil is in private beta — analyses need an account so your
+              saved pencils and required return follow you. In the meantime,{" "}
+              <Link href="/#score" className="font-semibold text-accent">
+                see the example analysis
+              </Link>{" "}
+              or ask for an invite below.
+            </p>
+          )}
+
+          <p className="text-center text-[13px] leading-[1.6] text-label">
+            New here?{" "}
+            <a
+              href="mailto:luke.f.miller.8@gmail.com?subject=PropPencil%20account"
+              className="font-semibold text-accent hover:text-link-hover"
+            >
+              Create an account
+            </a>{" "}
+            to save properties and set your required return.
           </p>
         </div>
-        <label className="flex flex-col gap-[5px]">
-          <span className="text-[10.5px] font-semibold uppercase tracking-[.11em] text-label">
-            Username
-          </span>
-          <input
-            required
-            autoFocus
-            autoComplete="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="first.last"
-            className={input}
-          />
-        </label>
-        <label className="flex flex-col gap-[5px]">
-          <span className="text-[10.5px] font-semibold uppercase tracking-[.11em] text-label">
-            Password
-          </span>
-          <input
-            required
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className={input}
-          />
-        </label>
-        {error && (
-          <div className="border-l-[3px] border-negative bg-accent-tint px-3 py-2 text-[12.5px] text-warn-ink">
-            {error}
-          </div>
-        )}
-        <button
-          type="submit"
-          disabled={loading}
-          className="cursor-pointer rounded-[2px] bg-accent px-4 py-[11px] text-[13px] font-semibold text-field hover:bg-accent-hover disabled:opacity-60"
-        >
-          {loading ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
-    </main>
+      </section>
+    </div>
   );
 }

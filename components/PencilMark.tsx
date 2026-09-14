@@ -36,6 +36,33 @@ export function AppMark({ size = 30 }: { size?: number }) {
   );
 }
 
+/** Inverted for dark grounds: graphite glyph inside the yellow square. */
+export function AppMarkInverted({ size = 32 }: { size?: number }) {
+  return (
+    <span
+      className="flex shrink-0 items-center justify-center rounded-[7px] bg-pencil"
+      style={{ width: size, height: size }}
+    >
+      <svg
+        width={Math.round(size * 0.63)}
+        height={Math.round(size * 0.63)}
+        viewBox="0 0 48 48"
+        fill="none"
+        aria-label="PropPencil"
+      >
+        <path
+          d="M9 26 L19 36 L33.5 19.5"
+          stroke="#171717"
+          strokeWidth={6.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M31 16 L41 11.5 L37 22 Z" fill="#171717" />
+      </svg>
+    </span>
+  );
+}
+
 /** Graphite-stroke variant for light grounds (beside section headings). */
 export function MarkOnLight({ size = 14 }: { size?: number }) {
   return <Glyph size={size} stroke="#171717" />;

@@ -1,29 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 
-// Gate the whole app behind the session cookie. Unauthenticated page loads
-// redirect to /login; unauthenticated API calls get a 401 (protecting the
-// paid ATTOM/Mashvisor quota, not just the UI).
+// Routing + auth gate. The marketing landing page lives at "/" and is
+// public; the app lives at /app behind the session cookie. Signed-in
+// visitors hitting "/" or /login go straight into the app; signed-out
+// visitors hitting the app are sent to /login with a `next` param so the
+// landing page's address funnel survives the round-trip.
 export async function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
   const user = await verifySessionToken(
     request.cookies.get(SESSION_COOKIE)?.value
   );
 
   if (user) {
-    if (pathname === "/login") {
-      return NextResponse.redirect(new URL("/", request.url));
+    if (pathname === "/login" || pathname === "/") {
+      return NextResponse.redirect(new URL("/app", request.url));
     }
     return NextResponse.next();
   }
 
-  if (pathname === "/login" || pathname === "/api/auth/login") {
+  if (pathname === "/" || pathname === "/login" || pathname === "/api/auth/login") {
     return NextResponse.next();
   }
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  return NextResponse.redirect(new URL("/login", request.url));
+  const login = new URL("/login", request.url);
+  login.searchParams.set("next", pathname + search);
+  return NextResponse.redirect(login);
 }
 
 export const config = {
