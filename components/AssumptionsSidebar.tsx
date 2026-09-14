@@ -143,7 +143,7 @@ export default function AssumptionsSidebar({
   onDeleteSearch: (id: string) => void;
 }) {
   return (
-    <aside className="sticky top-0 flex h-screen w-full flex-col gap-6 overflow-y-auto border-r border-rule bg-sidebar px-[22px] pb-11 pt-[26px]">
+    <aside className="flex w-full flex-col gap-6 border-r border-rule bg-sidebar px-[22px] pb-11 pt-[26px] max-lg:border-b max-lg:border-r-0 lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto">
       <div className="flex flex-col gap-[6px]">
         <h1 className="font-serif text-[23px] font-medium leading-[1.2] tracking-[-.01em]">
           Rental Cash Flow Analyzer

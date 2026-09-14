@@ -9,6 +9,7 @@ import {
   TIERS,
 } from "@/lib/metrics";
 import { computeScenariosFromData, buildPin, stressTest } from "@/lib/scenarios";
+import { nextTierUp, solveOfferPrices } from "@/lib/offer";
 import {
   bandNote,
   buildVerdict,
@@ -226,6 +227,7 @@ export default function Home() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [searches, setSearches] = useState<SavedSearch[]>([]);
   const [justSaved, setJustSaved] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/sources")
@@ -342,6 +344,7 @@ export default function Home() {
   async function analyze(addr?: string, opts?: { keepInputs?: boolean }) {
     const target = (addr ?? address).trim();
     if (!target) return;
+    setSidebarOpen(false); // on mobile, reveal the results
     setPhase("loading");
     setLoadStep(0);
     setError(null);
@@ -508,6 +511,15 @@ export default function Home() {
     };
   }, [data, scenarios, assumptionsFull]);
 
+  const offers = useMemo(() => {
+    if (!data || !assumptionsFull || ranked.length === 0) return null;
+    return solveOfferPrices(
+      data,
+      assumptionsFull,
+      ranked.map((r) => r.key)
+    );
+  }, [data, assumptionsFull, ranked]);
+
   // "312 WALNUT ST, CINCINNATI, OH, 45202" → "Cincinnati" for PHA guidance
   const cityLabel = useMemo(() => {
     const city = data?.property.matchedAddress.split(",")[1]?.trim() ?? "";
@@ -582,8 +594,21 @@ export default function Home() {
   const mvMissing = Boolean(data && !data.mashvisor?.str);
 
   return (
-    <div className="grid min-h-screen grid-cols-[300px_minmax(0,1fr)] items-start max-lg:grid-cols-1">
-      <AssumptionsSidebar
+    <div className="grid min-h-screen grid-cols-[300px_minmax(0,1fr)] items-start max-lg:block">
+      {/* mobile top bar — the sidebar becomes a toggled drawer under lg */}
+      <div className="sticky top-0 z-30 flex items-center justify-between border-b border-rule bg-sidebar px-4 py-3 lg:hidden">
+        <span className="font-serif text-[17px] font-medium">
+          Rental Cash Flow Analyzer
+        </span>
+        <button
+          onClick={() => setSidebarOpen((o) => !o)}
+          className="cursor-pointer rounded-[2px] border border-input-border bg-field px-3 py-[6px] text-[12px] font-semibold text-ink"
+        >
+          {sidebarOpen ? "Close" : "Inputs"}
+        </button>
+      </div>
+      <div className={`${sidebarOpen ? "block" : "hidden"} lg:block`}>
+        <AssumptionsSidebar
         address={address}
         onAddress={setAddress}
         price={price}
@@ -617,7 +642,8 @@ export default function Home() {
         onDeleteSearch={(id) =>
           setSearches((prev) => prev.filter((s) => s.id !== id))
         }
-      />
+        />
+      </div>
 
       <main className="flex max-w-[1120px] flex-col gap-9 px-12 pb-[70px] pt-10 max-md:px-5">
         {error && (
@@ -632,7 +658,7 @@ export default function Home() {
           <section className="flex flex-col gap-[34px]">
             <div className="flex flex-col gap-[14px] border-b-2 border-ink pb-[22px]">
               <Eyebrow>Start here</Eyebrow>
-              <h2 className="max-w-[26ch] font-serif text-[40px] font-medium leading-[1.12] tracking-[-.02em] [text-wrap:pretty]">
+              <h2 className="max-w-[26ch] font-serif text-[40px] max-md:text-[30px] font-medium leading-[1.12] tracking-[-.02em] [text-wrap:pretty]">
                 Underwrite one house three ways, then decide.
               </h2>
               <p className="max-w-[62ch] font-serif text-[17px] leading-[1.6] text-prose [text-wrap:pretty]">
@@ -734,7 +760,7 @@ export default function Home() {
           <section className="flex flex-col gap-[26px]">
             <header className="flex flex-col gap-[10px] border-b-2 border-ink pb-[18px]">
               <Eyebrow>Underwriting</Eyebrow>
-              <h2 className="font-serif text-[32px] font-medium leading-[1.15] tracking-[-.02em]">
+              <h2 className="font-serif text-[32px] max-md:text-[25px] font-medium leading-[1.15] tracking-[-.02em]">
                 {address || SAMPLE.address}
               </h2>
             </header>
@@ -835,7 +861,7 @@ export default function Home() {
                   </button>
                 </div>
               </div>
-              <h2 className="font-serif text-[38px] font-medium leading-[1.1] tracking-[-.02em]">
+              <h2 className="font-serif text-[38px] max-md:text-[27px] font-medium leading-[1.1] tracking-[-.02em]">
                 {data.property.matchedAddress}
               </h2>
               <div className="text-[13px] text-body">{subhead}</div>
@@ -903,7 +929,7 @@ export default function Home() {
               <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] items-start gap-x-11 gap-y-[30px]">
                 <div className="flex flex-col gap-[14px]">
                   <Eyebrow>The call</Eyebrow>
-                  <h3 className="font-serif text-[31px] font-medium leading-[1.22] tracking-[-.015em] [text-wrap:pretty]">
+                  <h3 className="font-serif text-[31px] max-md:text-[25px] font-medium leading-[1.22] tracking-[-.015em] [text-wrap:pretty]">
                     {verdict.headline}
                   </h3>
                   <p className="max-w-[60ch] font-serif text-[16.5px] leading-[1.62] text-prose [text-wrap:pretty]">
@@ -936,7 +962,7 @@ export default function Home() {
                           <RatingBadge rating={r.s.rating} small />
                         </div>
                         <span
-                          className={`font-serif text-[38px] font-medium leading-none tracking-[-.02em] ${cfClass(r.s.monthlyCashFlow)}`}
+                          className={`font-serif text-[38px] max-md:text-[30px] font-medium leading-none tracking-[-.02em] ${cfClass(r.s.monthlyCashFlow)}`}
                         >
                           {signedUsd(r.s.monthlyCashFlow)}/mo
                         </span>
@@ -974,6 +1000,94 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+            )}
+
+            {offers && offers.length > 0 && price !== "" && (
+              <section className="flex flex-col">
+                <SectionHead
+                  title="What to offer"
+                  caption="Highest price that still earns each tier — your assumptions, rent estimates held constant"
+                />
+                {(() => {
+                  const best = ranked[0];
+                  const bestSolution = offers.find((o) => o.key === best.key);
+                  const up = nextTierUp(best.s.rating);
+                  const target = up ? bestSolution?.byTier[up] : null;
+                  const asking = Number(price);
+                  return (
+                    <p className="max-w-[62ch] py-3 font-serif text-[15.5px] leading-[1.6] text-prose [text-wrap:pretty]">
+                      {best.s.rating === "Rare"
+                        ? `${DISPLAY_LABEL[best.key]} is already Rare at the asking price of ${usdWhole(asking)}.`
+                        : up && target != null
+                          ? `At ${usdWhole(asking)}, ${DISPLAY_LABEL[best.key].toLowerCase()} rates ${best.s.rating}. To make it ${up}, get the price to ${usdWhole(Math.min(target, asking))} — ${
+                              target >= asking
+                                ? "the asking price already qualifies once other terms hold"
+                                : `${usdWhole(asking - target)} below asking`
+                            }.`
+                          : `At ${usdWhole(asking)}, ${DISPLAY_LABEL[best.key].toLowerCase()} rates ${best.s.rating}, and the next tier is out of reach at any realistic price with these rents.`}
+                    </p>
+                  );
+                })()}
+                <div className="flex flex-col">
+                  {offers.map((o) => {
+                    const scenario = ranked.find((r) => r.key === o.key);
+                    if (!scenario) return null;
+                    return (
+                      <div
+                        key={o.key}
+                        className="flex flex-wrap items-baseline gap-x-4 gap-y-2 border-b border-rule py-[11px]"
+                      >
+                        <span className="w-[150px] font-serif text-[15px] font-medium">
+                          {DISPLAY_LABEL[o.key]}
+                        </span>
+                        {(["Rare", "Fantastic", "Great", "Good"] as Rating[]).map(
+                          (tier) => {
+                            const p = o.byTier[tier];
+                            const achievedNow = scenario.s.rating === tier;
+                            return (
+                              <span
+                                key={tier}
+                                className={`rounded-[2px] border px-2 py-[3px] text-[11.5px] tabular-nums ${
+                                  achievedNow ? "font-semibold" : ""
+                                }`}
+                                style={{
+                                  borderColor: RATING_COLORS[tier],
+                                  color: p == null ? "#7a7165" : RATING_COLORS[tier],
+                                  background: achievedNow
+                                    ? "rgba(150,85,42,.06)"
+                                    : "transparent",
+                                  borderStyle: p == null ? "dashed" : "solid",
+                                }}
+                                title={
+                                  p == null
+                                    ? `${tier} is out of reach at any realistic price with these rents and expenses.`
+                                    : p >= o.ceiling
+                                      ? `${tier} holds even past ${usdWhole(o.ceiling)}.`
+                                      : `Offer at or below ${usdWhole(p)} and this scenario rates ${tier}.`
+                                }
+                              >
+                                {tier}{" "}
+                                {p == null
+                                  ? "out of reach"
+                                  : p >= o.ceiling
+                                    ? `at any price`
+                                    : `≤ ${usdWhole(p)}`}
+                              </span>
+                            );
+                          }
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-[11.5px] leading-[1.6] text-label">
+                  Solved against the same math as the cards above: each figure
+                  is the most you can pay and still hit the tier, assuming the
+                  rent estimates hold. A lower approved Section 8 rent or a
+                  softer market comp moves every number down — re-run after
+                  verifying rents.
+                </p>
+              </section>
             )}
 
             {data.marketHealth && (
@@ -1274,7 +1388,8 @@ export default function Home() {
             {ranked.length > 0 && (
               <section className="flex flex-col">
                 <SectionHead title="Line by line" caption="Monthly unless noted" />
-                <div className="grid grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
+                <div className="overflow-x-auto">
+                <div className="grid min-w-[560px] grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
                   <span className="border-b border-rule py-[10px]" />
                   {(["Market rent", "Section 8", "Short-term"] as const).map(
                     (h, i) => (
@@ -1409,6 +1524,7 @@ export default function Home() {
                       </>
                     );
                   })()}
+                </div>
                 </div>
               </section>
             )}
@@ -1718,7 +1834,8 @@ export default function Home() {
                   focusId={focusId}
                 />
 
-                <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1fr_1.2fr_28px]">
+                <div className="overflow-x-auto">
+                <div className="grid min-w-[700px] grid-cols-[2fr_1fr_1fr_1fr_1fr_1.2fr_28px]">
                   {["Property", "Price", "Market", "Sec. 8", "Airbnb", "Best play", ""].map(
                     (h, i) => (
                       <span
@@ -1822,6 +1939,7 @@ export default function Home() {
                         </span>
                       );
                     })}
+                </div>
                 </div>
               </section>
             )}
