@@ -1,7 +1,12 @@
 "use client";
 
 import BatchImport from "@/components/BatchImport";
-import type { Assumptions, SavedPin } from "@/lib/types";
+import type {
+  Assumptions,
+  HistoryEntry,
+  SavedPin,
+  SavedSearch,
+} from "@/lib/types";
 
 export interface SourceStatus {
   census: boolean;
@@ -104,6 +109,10 @@ export default function AssumptionsSidebar({
   batchDefaultPrice,
   batchDefaultBedrooms,
   onPin,
+  history,
+  searches,
+  onLoadSearch,
+  onDeleteSearch,
 }: {
   address: string;
   onAddress: (v: string) => void;
@@ -128,6 +137,10 @@ export default function AssumptionsSidebar({
   batchDefaultPrice: number;
   batchDefaultBedrooms: number;
   onPin: (pin: SavedPin) => void;
+  history: HistoryEntry[];
+  searches: SavedSearch[];
+  onLoadSearch: (s: SavedSearch) => void;
+  onDeleteSearch: (id: string) => void;
 }) {
   return (
     <aside className="sticky top-0 flex h-screen w-full flex-col gap-6 overflow-y-auto border-r border-rule bg-sidebar px-[22px] pb-11 pt-[26px]">
@@ -166,8 +179,17 @@ export default function AssumptionsSidebar({
             value={address}
             onChange={(e) => onAddress(e.target.value)}
             placeholder="123 Main St, Cincinnati, OH"
+            list="address-history"
             className={`${inputBase} w-full px-[10px] py-[9px] text-[13px]`}
           />
+          {/* previously analyzed addresses, most recent first */}
+          <datalist id="address-history">
+            {history.map((h) => (
+              <option key={h.address} value={h.address}>
+                {`${h.bedrooms} bed · $${h.price.toLocaleString("en-US")}`}
+              </option>
+            ))}
+          </datalist>
         </label>
         <div className="grid grid-cols-[1fr_74px] gap-2">
           <label className="flex flex-col gap-[5px]">
@@ -207,6 +229,61 @@ export default function AssumptionsSidebar({
           onPin={onPin}
         />
       </form>
+
+      {searches.length > 0 && (
+        <div className="flex flex-col gap-[6px] border-t border-rule pt-[18px]">
+          <MicroLabel>Saved searches</MicroLabel>
+          {searches.map((s) => (
+            <div
+              key={s.id}
+              className="flex items-start justify-between gap-2 border-b border-rule pb-[7px]"
+            >
+              <button
+                type="button"
+                onClick={() => onLoadSearch(s)}
+                title="Re-run this analysis with the saved price, bedrooms and assumptions"
+                className="flex min-w-0 cursor-pointer flex-col items-start gap-[1px] text-left"
+              >
+                <span className="w-full truncate text-[12.5px] text-ink hover:text-accent">
+                  {s.name}
+                </span>
+                <span className="text-[11px] text-label">
+                  ${s.price.toLocaleString("en-US")} · {s.bedrooms} bed ·{" "}
+                  {new Date(s.savedAt).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onDeleteSearch(s.id)}
+                title="Delete saved search"
+                className="cursor-pointer px-1 text-[12px] text-label hover:text-negative"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div className="flex flex-col gap-[6px] border-t border-rule pt-[18px]">
+          <MicroLabel>Recent addresses</MicroLabel>
+          {history.slice(0, 5).map((h) => (
+            <button
+              key={h.address}
+              type="button"
+              onClick={() => onAddress(h.address)}
+              title="Fill the address field (also available by typing in the field)"
+              className="cursor-pointer truncate text-left text-[12px] text-body hover:text-accent"
+            >
+              {h.address}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-col gap-[9px] border-t border-rule pt-[18px]">
         <MicroLabel>Data sources</MicroLabel>

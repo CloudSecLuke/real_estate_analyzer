@@ -150,6 +150,26 @@ export interface Assumptions {
 // Which scenario a pin/map view is keyed to
 export type ScenarioKey = "market" | "s8" | "str";
 
+// A previously analyzed address (feeds the address-field history dropdown)
+export interface HistoryEntry {
+  address: string; // geocoder-matched address
+  queriedAt: string; // ISO timestamp
+  price: number;
+  bedrooms: number;
+}
+
+// A saved search: everything needed to re-run an analysis exactly as it
+// was — address, price, bedrooms and the full assumption snapshot.
+export interface SavedSearch {
+  id: string;
+  name: string;
+  address: string;
+  price: number;
+  bedrooms: number;
+  assumptions: Omit<Assumptions, "price" | "bedrooms">;
+  savedAt: string; // ISO timestamp
+}
+
 export type Rating = "Rare" | "Fantastic" | "Great" | "Good" | "Poor";
 
 // Snapshot of an analyzed property shown as a map pin (persisted in localStorage)

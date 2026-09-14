@@ -29,9 +29,11 @@ import InfoTip from "@/components/InfoTip";
 import type {
   AnalyzeResponse,
   Assumptions,
+  HistoryEntry,
   PinMetrics,
   Rating,
   SavedPin,
+  SavedSearch,
   ScenarioKey,
   ScenarioResult,
 } from "@/lib/types";
@@ -46,6 +48,10 @@ const PropertyMap = dynamic(() => import("@/components/PropertyMap"), {
 
 const ALL_RATINGS: Rating[] = ["Rare", "Fantastic", "Great", "Good", "Poor"];
 const PINS_KEY = "rea_saved_pins_v1";
+const HISTORY_KEY = "rea_history_v1";
+const SEARCHES_KEY = "rea_searches_v1";
+const HISTORY_MAX = 20;
+const SEARCHES_MAX = 30;
 const SAMPLE = { address: "1418 Vine St, Cincinnati, OH 45202", price: 118000, beds: 3 };
 
 type Phase = "empty" | "loading" | "results";
@@ -217,6 +223,9 @@ export default function Home() {
     new Set(ALL_RATINGS)
   );
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [searches, setSearches] = useState<SavedSearch[]>([]);
+  const [justSaved, setJustSaved] = useState(false);
 
   useEffect(() => {
     fetch("/api/sources")
@@ -228,6 +237,8 @@ export default function Home() {
   useEffect(() => {
     (async () => {
       let pins: SavedPin[] = [];
+      let hist: HistoryEntry[] = [];
+      let srch: SavedSearch[] = [];
       try {
         const res = await fetch("/api/pins");
         if (res.status === 401) {
@@ -238,23 +249,32 @@ export default function Home() {
         setUser(json.user ?? null);
         setPersistent(Boolean(json.persistent));
         pins = Array.isArray(json.pins) ? json.pins : [];
+        hist = Array.isArray(json.history) ? json.history : [];
+        srch = Array.isArray(json.searches) ? json.searches : [];
         if (json.assumptions) setAdv((p) => ({ ...p, ...json.assumptions }));
       } catch {
         // server unreachable — run local-only
       }
-      if (pins.length === 0) {
-        // migrate any pre-auth localStorage pins into the account
+      // localStorage fills any gap the server didn't have
+      const localFallback = <T,>(key: string, current: T[]): T[] => {
+        if (current.length > 0) return current;
         try {
-          const raw = localStorage.getItem(PINS_KEY);
+          const raw = localStorage.getItem(key);
           if (raw) {
             const local = JSON.parse(raw);
-            if (Array.isArray(local)) pins = local;
+            if (Array.isArray(local)) return local;
           }
         } catch {
           // corrupted storage — start fresh
         }
-      }
+        return current;
+      };
+      pins = localFallback(PINS_KEY, pins);
+      hist = localFallback(HISTORY_KEY, hist);
+      srch = localFallback(SEARCHES_KEY, srch);
       setSavedPins(pins);
+      setHistory(hist);
+      setSearches(srch);
       setPinsLoaded(true);
 
       // Current 30-yr average (Freddie Mac via FRED) replaces the stale
@@ -278,18 +298,25 @@ export default function Home() {
   useEffect(() => {
     if (!pinsLoaded) return;
     localStorage.setItem(PINS_KEY, JSON.stringify(savedPins));
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    localStorage.setItem(SEARCHES_KEY, JSON.stringify(searches));
     if (!persistent) return;
     const t = setTimeout(() => {
       fetch("/api/pins", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pins: savedPins, assumptions: adv }),
+        body: JSON.stringify({
+          pins: savedPins,
+          assumptions: adv,
+          history,
+          searches,
+        }),
       }).catch(() => {
         // transient save failure — localStorage still has the data
       });
     }, 800);
     return () => clearTimeout(t);
-  }, [savedPins, adv, pinsLoaded, persistent]);
+  }, [savedPins, adv, history, searches, pinsLoaded, persistent]);
 
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
@@ -312,7 +339,7 @@ export default function Home() {
     [sources]
   );
 
-  async function analyze(addr?: string) {
+  async function analyze(addr?: string, opts?: { keepInputs?: boolean }) {
     const target = (addr ?? address).trim();
     if (!target) return;
     setPhase("loading");
@@ -334,28 +361,57 @@ export default function Home() {
       if (!res.ok) throw new Error(json.error ?? "Analysis failed");
       const resp = json as AnalyzeResponse;
       // Auto-fill from real property data: listing (Mashvisor) wins, then
-      // ATTOM's records — the user can still edit either field.
+      // ATTOM's records — the user can still edit either field. Skipped
+      // when replaying a saved search, whose inputs are the point.
       const listing = resp.mashvisor?.listing;
       const bedsAuto = listing?.beds ?? resp.attom?.beds;
       const priceAuto = listing?.listPrice;
-      if (bedsAuto != null) setBedrooms(bedsAuto);
-      if (priceAuto != null) setPrice(Math.round(priceAuto));
-      const vacancyAuto = resp.acsRent?.rentalVacancyPct;
-      if (vacancyAuto != null) {
-        setAdv((p) => ({
-          ...p,
-          vacancyPctMarket: Math.round(vacancyAuto * 10) / 10,
-        }));
+      let finalPrice = price === "" ? 0 : Number(price);
+      let finalBeds = bedrooms === "" ? 3 : Number(bedrooms);
+      if (!opts?.keepInputs) {
+        if (bedsAuto != null) {
+          setBedrooms(bedsAuto);
+          finalBeds = bedsAuto;
+        }
+        if (priceAuto != null) {
+          const rounded = Math.round(priceAuto);
+          setPrice(rounded);
+          finalPrice = rounded;
+        }
+        const vacancyAuto = resp.acsRent?.rentalVacancyPct;
+        if (vacancyAuto != null) {
+          setAdv((p) => ({
+            ...p,
+            vacancyPctMarket: Math.round(vacancyAuto * 10) / 10,
+          }));
+        }
+        const filled = [
+          priceAuto != null ? "price" : null,
+          bedsAuto != null ? "bedrooms" : null,
+          vacancyAuto != null
+            ? `empty-months rate (county actual ${vacancyAuto}%)`
+            : null,
+        ].filter(Boolean);
+        setAutoFilled(
+          filled.length
+            ? `${filled.join(" & ")} auto-filled — edit freely`
+            : null
+        );
       }
-      const filled = [
-        priceAuto != null ? "price" : null,
-        bedsAuto != null ? "bedrooms" : null,
-        vacancyAuto != null
-          ? `empty-months rate (county actual ${vacancyAuto}%)`
-          : null,
-      ].filter(Boolean);
-      setAutoFilled(
-        filled.length ? `${filled.join(" & ")} auto-filled — edit freely` : null
+      // record in the address history (dedupe, most recent first)
+      const matched = resp.property.matchedAddress;
+      setHistory((prev) =>
+        [
+          {
+            address: matched,
+            queriedAt: new Date().toISOString(),
+            price: finalPrice,
+            bedrooms: finalBeds,
+          },
+          ...prev.filter(
+            (h) => h.address.toLowerCase() !== matched.toLowerCase()
+          ),
+        ].slice(0, HISTORY_MAX)
       );
       setData(resp);
       setLoadStep(6);
@@ -383,6 +439,35 @@ export default function Home() {
     setError(null);
     setAutoFilled(null);
     setPhase("empty");
+  }
+
+  function saveSearch() {
+    if (!data || price === "" || bedrooms === "") return;
+    const entry: SavedSearch = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: data.property.matchedAddress,
+      address: data.property.matchedAddress,
+      price: Number(price),
+      bedrooms: Number(bedrooms),
+      assumptions: { ...adv },
+      savedAt: new Date().toISOString(),
+    };
+    setSearches((prev) =>
+      [entry, ...prev.filter((s) => s.address !== entry.address)].slice(
+        0,
+        SEARCHES_MAX
+      )
+    );
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 2000);
+  }
+
+  function loadSearch(s: SavedSearch) {
+    setAddress(s.address);
+    setPrice(s.price);
+    setBedrooms(s.bedrooms);
+    setAdv((p) => ({ ...p, ...s.assumptions }));
+    analyze(s.address, { keepInputs: true });
   }
 
   const scenarios = useMemo(() => {
@@ -525,6 +610,12 @@ export default function Home() {
         batchDefaultBedrooms={bedrooms === "" ? 3 : Number(bedrooms)}
         onPin={(pin) =>
           setSavedPins((prev) => [...prev.filter((p) => p.id !== pin.id), pin])
+        }
+        history={history}
+        searches={searches}
+        onLoadSearch={loadSearch}
+        onDeleteSearch={(id) =>
+          setSearches((prev) => prev.filter((s) => s.id !== id))
         }
       />
 
@@ -712,6 +803,16 @@ export default function Home() {
               <div className="flex flex-wrap items-baseline justify-between gap-3">
                 <Eyebrow>Deal brief · {dealDate}</Eyebrow>
                 <div className="flex gap-4 text-[12px]">
+                  <button
+                    onClick={saveSearch}
+                    className={`cursor-pointer border-b ${
+                      justSaved
+                        ? "border-transparent text-positive"
+                        : "border-accent/30 text-accent hover:text-link-hover"
+                    }`}
+                  >
+                    {justSaved ? "Saved ✓" : "Save search"}
+                  </button>
                   <button
                     onClick={() => window.print()}
                     className="cursor-pointer border-b border-accent/30 text-accent hover:text-link-hover"

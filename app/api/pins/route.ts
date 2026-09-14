@@ -21,6 +21,8 @@ export async function GET(req: NextRequest) {
       persistent: false,
       pins: [],
       assumptions: null,
+      history: [],
+      searches: [],
     });
   }
   try {
@@ -29,7 +31,15 @@ export async function GET(req: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : "Database error";
     return NextResponse.json(
-      { user, persistent: false, pins: [], assumptions: null, error: message },
+      {
+        user,
+        persistent: false,
+        pins: [],
+        assumptions: null,
+        history: [],
+        searches: [],
+        error: message,
+      },
       { status: 200 }
     );
   }
@@ -48,17 +58,21 @@ export async function PUT(req: NextRequest) {
   }
   let pins: SavedPin[];
   let assumptions;
+  let history;
+  let searches;
   try {
     const body = await req.json();
     if (!Array.isArray(body.pins)) throw new Error("pins must be an array");
     pins = body.pins;
     assumptions = body.assumptions ?? null;
+    history = Array.isArray(body.history) ? body.history : [];
+    searches = Array.isArray(body.searches) ? body.searches : [];
   } catch (e) {
     const message = e instanceof Error ? e.message : "Invalid JSON body";
     return NextResponse.json({ error: message }, { status: 400 });
   }
   try {
-    await saveUserState(user, { pins, assumptions });
+    await saveUserState(user, { pins, assumptions, history, searches });
     return NextResponse.json({ ok: true });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Database error";
