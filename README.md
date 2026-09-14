@@ -10,7 +10,10 @@ across two scenarios side by side:
   Mashvisor key is configured)
 
 Each scenario shows monthly cash flow after mortgage, cash-on-cash ROI, cap
-rate, GRM, NOI, and a deal rating (**Rare / Fantastic / Great / Good / Poor**).
+rate, GRM, NOI, a 0-100 **Pencil Score** (weighted: cash flow 30, cash-on-cash
+25, cap rate 15, debt coverage 15, price-vs-investor-value 15), and a
+**sharpness** threshold rating (**Razor Sharp / Sharp / Pointed / Needs
+Sharpening / Broken** — formerly Rare / Fantastic / Great / Good / Poor).
 Break-even is treated as Poor by design — this tool is for finding deals that
 cash flow.
 
@@ -97,15 +100,15 @@ Defaults (all editable in the UI): 20% down, 7.25% / 30yr, 3% closing costs,
 1%/yr maintenance reserve, 10% management, 5% vacancy market / 2% Section 8,
 Section 8 payment standard 110% of FMR.
 
-### Rating thresholds (per unit)
+### Sharpness thresholds (per unit)
 
-| Rating | Monthly cash flow | Cash-on-cash | Cap rate |
+| Sharpness | Monthly cash flow | Cash-on-cash | Cap rate |
 |---|---|---|---|
-| Rare | ≥ $400 | ≥ 12% | ≥ 8% |
-| Fantastic | ≥ $250 | ≥ 10% | — |
-| Great | ≥ $150 | ≥ 8% | — |
-| Good | > $50 | ≥ 5% | — |
-| Poor | anything else (incl. break-even) | | |
+| Razor Sharp *(was Rare)* | ≥ $400 | ≥ 12% | ≥ 8% |
+| Sharp *(was Fantastic)* | ≥ $250 | ≥ 10% | — |
+| Pointed *(was Great)* | ≥ $150 | ≥ 8% | — |
+| Needs Sharpening *(was Good)* | > $50 | ≥ 5% | — |
+| Broken *(was Poor)* | anything else (incl. break-even) | | |
 
 **Near-miss nuance:** a deal that misses the next tier by a small margin
 (within $50/mo cash flow, 1.5% CoC, or 1% cap rate on every failing metric)

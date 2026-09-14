@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   DEFAULT_ASSUMPTIONS,
+  LEGACY_RATING_LABEL,
   projectFiveYears,
   RATING_COLORS,
   TIERS,
@@ -100,11 +101,11 @@ function TierBadge({ tier, small }: { tier: PencilTier; small?: boolean }) {
 function LegacyBadge({ rating }: { rating: Rating }) {
   return (
     <span
-      title="Legacy threshold rating (Rare ≥ $400/mo cash flow, ≥12% cash-on-cash, ≥8% cap rate; Fantastic ≥ $250/≥10%; Great ≥ $150/≥8%; Good > $50/≥5%)"
+      title="Sharpness — the fixed-threshold read (Razor Sharp ≥ $400/mo cash flow, ≥12% cash-on-cash, ≥8% cap rate; Sharp ≥ $250/≥10%; Pointed ≥ $150/≥8%; Needs Sharpening > $50/≥5%; Broken otherwise)"
       className="flex-none whitespace-nowrap rounded-[5px] px-[7px] py-[2px] text-[10px] font-bold uppercase tracking-[.05em] text-card"
       style={{ backgroundColor: RATING_COLORS[rating] }}
     >
-      {rating}
+      {LEGACY_RATING_LABEL[rating]}
     </span>
   );
 }
@@ -115,7 +116,7 @@ function AlmostChip({ almost }: { almost: Rating }) {
       className="flex-none whitespace-nowrap rounded-[5px] border border-dashed px-[7px] py-[2px] text-[10.5px] font-medium"
       style={{ borderColor: RATING_COLORS[almost], color: RATING_COLORS[almost] }}
     >
-      Almost {almost}
+      Almost {LEGACY_RATING_LABEL[almost]}
     </span>
   );
 }
@@ -196,12 +197,12 @@ function WhyRating({ s, units }: { s: ScenarioResult; units: number }) {
   return (
     <details className="mt-1 text-[12.5px]">
       <summary className="cursor-pointer text-label">
-        Why {s.rating} (legacy rating)?
+        Why {LEGACY_RATING_LABEL[s.rating]} (sharpness)?
       </summary>
       <p className="mt-1 text-[11.5px] text-label">
         {s.rating === "Poor"
-          ? "Fails the minimum (Good) thresholds:"
-          : `Meets every ${s.rating}-tier threshold${s.rating !== "Rare" ? " (but not the next tier up)" : ""}:`}
+          ? "Fails the minimum (Needs Sharpening) thresholds:"
+          : `Meets every ${LEGACY_RATING_LABEL[s.rating]} threshold${s.rating !== "Rare" ? " (but not the next tier up)" : ""}:`}
       </p>
       <table className="mt-1 w-full">
         <tbody>
@@ -1303,8 +1304,8 @@ export default function Home() {
             {offers && offers.length > 0 && (
               <section className="flex flex-col">
                 <SectionHead
-                  title="What to offer, by legacy tier"
-                  caption="Highest price that still earns each threshold rating — rent estimates held constant"
+                  title="What to offer, by sharpness"
+                  caption="Highest price that still earns each sharpness tier — rent estimates held constant"
                 />
                 <div className="flex flex-col">
                   {offers.map((o) => {
@@ -1333,13 +1334,13 @@ export default function Home() {
                               }}
                               title={
                                 p == null
-                                  ? `${tr} is out of reach at any realistic price with these rents and expenses.`
+                                  ? `${LEGACY_RATING_LABEL[tr]} is out of reach at any realistic price with these rents and expenses.`
                                   : p >= o.ceiling
-                                    ? `${tr} holds even past ${usdWhole(o.ceiling)}.`
-                                    : `Offer at or below ${usdWhole(p)} and this strategy rates ${tr} on the legacy thresholds.`
+                                    ? `${LEGACY_RATING_LABEL[tr]} holds even past ${usdWhole(o.ceiling)}.`
+                                    : `Offer at or below ${usdWhole(p)} and this strategy rates ${LEGACY_RATING_LABEL[tr]} on the sharpness thresholds.`
                               }
                             >
-                              {tr}{" "}
+                              {LEGACY_RATING_LABEL[tr]}{" "}
                               {p == null
                                 ? "out of reach"
                                 : p >= o.ceiling
@@ -1353,11 +1354,12 @@ export default function Home() {
                   })}
                 </div>
                 <p className="mt-2 text-[11.5px] leading-[1.6] text-label">
-                  The legacy threshold tiers (Rare ≥ $400/mo cash flow · ≥12%
-                  cash-on-cash · ≥8% cap rate, and so on) complement the Pencil
-                  Score&apos;s Maximum Buy Price above: that answers &ldquo;what
-                  price hits my required return&rdquo;, these answer &ldquo;what
-                  price hits each rating&rdquo;.
+                  Sharpness tiers read fixed bars (Razor Sharp ≥ $400/mo cash
+                  flow · ≥12% cash-on-cash · ≥8% cap rate, and so on down to
+                  Broken) and complement the Pencil Score&apos;s Maximum Buy
+                  Price above: that answers &ldquo;what price hits my required
+                  return&rdquo;, these answer &ldquo;what price hits each
+                  sharpness&rdquo;.
                 </p>
               </section>
             )}
@@ -2105,11 +2107,11 @@ export default function Home() {
                               {t && <TierBadge tier={t} small />}
                               {m?.almost && (
                                 <span
-                                  title={m.gapText ? `${m.gapText} away from ${m.almost} (legacy tiers)` : `almost ${m.almost}`}
+                                  title={m.gapText ? `${m.gapText} away from ${LEGACY_RATING_LABEL[m.almost]}` : `almost ${LEGACY_RATING_LABEL[m.almost]}`}
                                   className="whitespace-nowrap text-[10px]"
                                   style={{ color: RATING_COLORS[m.almost] }}
                                 >
-                                  almost {m.almost}
+                                  almost {LEGACY_RATING_LABEL[m.almost]}
                                 </span>
                               )}
                             </span>
@@ -2143,12 +2145,17 @@ export default function Home() {
               <b className="font-bold text-body">Great</b> 70–79 ·{" "}
               <b className="font-bold text-body">Good</b> 60–69 ·{" "}
               <b className="font-bold text-body">Fair</b> 50–59 ·{" "}
-              <b className="font-bold text-body">Poor</b> below 50. The legacy
-              threshold badges on each strategy read cash flow, cash-on-cash and
-              cap rate against fixed bars (Rare ≥ $400/mo · ≥12% · ≥8%), with a
-              dashed <b className="font-bold text-body">Almost</b> badge when a
-              tier is missed by less than $50/mo, 1.5 points of cash-on-cash or
-              1 point of cap rate. Breaking even is not a goal. Every figure is
+              <b className="font-bold text-body">Poor</b> below 50. The
+              sharpness badge on each strategy reads cash flow, cash-on-cash and
+              cap rate against fixed bars — <b className="font-bold text-body">Razor
+              Sharp</b> ≥ $400/mo · ≥12% · ≥8% cap ·{" "}
+              <b className="font-bold text-body">Sharp</b> ≥ $250/mo · ≥10% ·{" "}
+              <b className="font-bold text-body">Pointed</b> ≥ $150/mo · ≥8% ·{" "}
+              <b className="font-bold text-body">Needs Sharpening</b> &gt; $50/mo
+              · ≥5% · <b className="font-bold text-body">Broken</b> otherwise —
+              with a dashed <b className="font-bold text-body">Almost</b> badge
+              when a tier is missed by less than $50/mo, 1.5 points of
+              cash-on-cash or 1 point of cap rate. Breaking even is not a goal. Every figure is
               an estimate from public data — HUD Fair Market Rents, FEMA flood
               maps, the Census geocoder, Census county data (taxes, rents,
               vacancy, population), BLS unemployment and the FRED mortgage

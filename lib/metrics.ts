@@ -287,3 +287,14 @@ export const RATING_COLORS: Record<Rating, string> = {
   Good: "#8c5b10",
   Poor: "#a33a2b",
 };
+
+// PropPencil nomenclature for the threshold ratings — a sharpness ladder.
+// Display names only: the internal Rating values, thresholds, Almost
+// margins and stored pin data are unchanged.
+export const LEGACY_RATING_LABEL: Record<Rating, string> = {
+  Rare: "Razor Sharp",
+  Fantastic: "Sharp",
+  Great: "Pointed",
+  Good: "Needs Sharpening",
+  Poor: "Broken",
+};

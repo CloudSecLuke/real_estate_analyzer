@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { PinMetrics, SavedPin, ScenarioKey } from "@/lib/types";
-import { RATING_COLORS } from "@/lib/metrics";
+import { LEGACY_RATING_LABEL, RATING_COLORS } from "@/lib/metrics";
 import {
   tierForLegacyRating,
   tierForScore,
@@ -49,7 +49,7 @@ function bestPlay(pin: SavedPin): string {
 
 function scenarioMini(label: string, m: PinMetrics | undefined): string {
   if (!m) return "";
-  return `<div style="font-size:11px;color:#5f5f5c">${label} ${signed(m.monthlyCashFlow)}/mo${m.score != null ? ` · score ${m.score}` : ` · ${m.rating}`}${m.almost ? ` (almost ${m.almost}${m.gapText ? ", " + m.gapText : ""})` : ""}</div>`;
+  return `<div style="font-size:11px;color:#5f5f5c">${label} ${signed(m.monthlyCashFlow)}/mo${m.score != null ? ` · score ${m.score}` : ` · ${LEGACY_RATING_LABEL[m.rating]}`}${m.almost ? ` (almost ${LEGACY_RATING_LABEL[m.almost]}${m.gapText ? ", " + m.gapText : ""})` : ""}</div>`;
 }
 
 export default function PropertyMap({
