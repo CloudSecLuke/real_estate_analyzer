@@ -25,15 +25,36 @@ the sorted table below the map. Pins and assumptions persist per-user in
 Neon Postgres (localStorage is the offline fallback and one-time migration
 source).
 
-## Auth & persistence
+## Auth, accounts & billing
 
 The app is gated by `proxy.ts` behind a signed session cookie (HMAC,
-30-day expiry). Exactly two accounts exist — `luke.miller` and
-`bart.miller` — with scrypt password hashes stored in env vars, not in
-code. Unauthenticated pages redirect to `/login`; unauthenticated API
-calls get 401, which also protects the paid ATTOM/Mashvisor quotas.
-Per-user state (map pins + assumptions) lives in a single `user_state`
-table (jsonb) in Neon Postgres, saved with a debounce from the client.
+30-day expiry, httpOnly/Secure/SameSite=Lax). Accounts come in two
+flavors: self-serve signups at `/signup` (scrypt hashes in a Neon
+`users` table) and two founder accounts (`luke.miller`, `bart.miller`)
+whose hashes live in env vars. Unauthenticated pages redirect to
+`/login`; unauthenticated API calls get 401, which also protects the
+paid ATTOM/Mashvisor quotas.
+
+**Plans**: every new account gets **1 free pencil** (full analysis);
+after that `/api/analyze` returns 402 and the app offers the
+**Investor plan — $19/mo for 100 pencils** via Stripe Checkout
+(hosted). A Stripe webhook (`/api/billing/webhook`) keeps the
+`entitlements` table in sync; the customer portal handles cancel/card
+changes. Founders are unlimited. Live keys run in the Vercel
+production env; the development env uses Stripe sandbox keys.
+
+Per-user state (map pins + assumptions + history + saved searches)
+lives in a single `user_state` table (jsonb) in Neon Postgres, saved
+with a debounce from the client.
+
+## Issue tracking
+
+Work is tracked as GitHub issues titled `PROP-<n>: …` with priority
+labels `P0`/`P1`/`P2` and area labels (`security`, `reliability`,
+`billing`, `infra`, `ux`, `legal`). The PROP number in the title is
+the canonical ID (it may differ from the GitHub issue number). Start
+with `gh issue list --label P0`, reference tickets in commits
+("Resolves PROP-4"), and file new ideas as new PROP issues.
 
 ## Data sources
 
