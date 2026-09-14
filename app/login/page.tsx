@@ -72,7 +72,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [reveal, setReveal] = useState(false);
   const [remember, setRemember] = useState(true);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [last, setLast] = useState<LastPenciled | null>(null);
   const [nextUrl, setNextUrl] = useState("/app");
@@ -88,17 +88,28 @@ export default function LoginPage() {
     e.preventDefault();
     if (loading) return;
     setLoading(true);
-    setError(false);
+    setError(null);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password, remember }),
       });
-      if (!res.ok) throw new Error("bad credentials");
+      if (res.status === 429) {
+        const json = await res.json().catch(() => null);
+        throw new Error(
+          json?.error ?? "Too many attempts — wait a minute and try again."
+        );
+      }
+      if (!res.ok) throw new Error("bad_credentials");
       window.location.href = nextUrl;
-    } catch {
-      setError(true);
+    } catch (err) {
+      // "" → the default wrong-password copy; any other string → verbatim
+      setError(
+        err instanceof Error && err.message !== "bad_credentials"
+          ? err.message
+          : ""
+      );
       setLoading(false);
     }
   }
@@ -197,13 +208,19 @@ export default function LoginPage() {
             <p className="text-[14px] text-label">Sign in to continue.</p>
           </div>
 
-          {error && (
+          {error !== null && (
             <div className="flex gap-[11px] rounded-[8px] border border-[#e6c4bf] border-l-4 border-l-negative bg-[#f7ece9] px-[14px] py-3">
               <p className="text-[13px] leading-[1.55] text-[#7a1f17]">
-                <b className="font-bold">
-                  That username and password do not match.
-                </b>{" "}
-                Check for a stray capital, or reset your password below.
+                {error ? (
+                  <b className="font-bold">{error}</b>
+                ) : (
+                  <>
+                    <b className="font-bold">
+                      That username and password do not match.
+                    </b>{" "}
+                    Check for a stray capital, or reset your password below.
+                  </>
+                )}
               </p>
             </div>
           )}

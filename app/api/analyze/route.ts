@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { canPencil, recordPencil } from "@/lib/users";
+import { checkRateLimit, tooMany } from "@/lib/ratelimit";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 import { geocodeAddress } from "@/lib/geocode";
 import { getFmr } from "@/lib/hud";
@@ -22,6 +23,15 @@ export async function POST(req: NextRequest) {
   const user = await verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value);
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // Burst guard per account — protects the paid ATTOM/Mashvisor quota
+  // from scripted loops. The monthly pencil quota is enforced below.
+  const rl = await checkRateLimit("analyze_user", user, 10, 60);
+  if (!rl.allowed) {
+    return tooMany(
+      "That's a lot of pencils at once — wait a minute and try again.",
+      rl.retryAfterSecs
+    );
   }
   const permission = await canPencil(user).catch(() => null);
   if (!permission) {

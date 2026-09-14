@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createUser, isUsersDbConfigured } from "@/lib/users";
+import { checkRateLimit, ipKey, tooMany } from "@/lib/ratelimit";
 import {
   createSessionToken,
   SESSION_COOKIE,
@@ -7,6 +8,14 @@ import {
 } from "@/lib/session";
 
 export async function POST(req: NextRequest) {
+  const rl = await checkRateLimit("signup_ip", ipKey(req), 3, 60 * 60);
+  if (!rl.allowed) {
+    return tooMany(
+      "Too many sign-ups from this connection — try again later.",
+      rl.retryAfterSecs
+    );
+  }
+
   if (!isUsersDbConfigured()) {
     return NextResponse.json(
       { error: "Sign-ups are not available right now." },
