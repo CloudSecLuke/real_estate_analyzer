@@ -1002,6 +1002,62 @@ export default function Home() {
               </div>
             )}
 
+            <section className="flex flex-col gap-2 border-y border-rule py-3">
+              <span className="flex items-center text-[10.5px] font-semibold uppercase tracking-[.12em] text-label">
+                Quick adjustments — every number recomputes instantly
+                <InfoTip text="Change a value here or in the left panel and the whole brief — scenarios, verdict, offer prices, stress test — recalculates immediately, no re-query. The full set of assumptions (closing costs, rehab, expense floors, appreciation and more) is in the sidebar under Assumptions." />
+              </span>
+              <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+                {(
+                  [
+                    ["Interest rate", "interestRatePct", "%", 0.125],
+                    ["Down payment", "downPaymentPct", "%", 5],
+                    ["Closing costs", "closingCostPct", "%", 0.5],
+                    ["Management", "managementPct", "% (0 = self-manage)", 1],
+                    ["Payment standard", "paymentStandardPct", "% of FMR", 5],
+                  ] as const
+                ).map(([labelText, key, unit, step]) => (
+                  <label key={key} className="flex flex-col gap-[3px]">
+                    <span className="text-[11px] text-label">{labelText}</span>
+                    <span className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step={step}
+                        value={adv[key]}
+                        onChange={(e) =>
+                          setA(
+                            key,
+                            e.target.value === "" ? 0 : Number(e.target.value)
+                          )
+                        }
+                        className="w-[64px] rounded-[2px] border border-input-border bg-field px-[6px] py-[4px] text-right text-[12.5px] text-ink outline-none focus:border-accent"
+                      />
+                      <span className="text-[10.5px] text-label">{unit}</span>
+                    </span>
+                  </label>
+                ))}
+                <label className="flex flex-col gap-[3px]">
+                  <span className="text-[11px] text-label">Rent override</span>
+                  <span className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      step={25}
+                      placeholder="auto"
+                      value={adv.marketRentOverride ?? ""}
+                      onChange={(e) =>
+                        setA(
+                          "marketRentOverride",
+                          e.target.value === "" ? null : Number(e.target.value)
+                        )
+                      }
+                      className="w-[72px] rounded-[2px] border border-input-border bg-field px-[6px] py-[4px] text-right text-[12.5px] text-ink outline-none focus:border-accent"
+                    />
+                    <span className="text-[10.5px] text-label">$/mo</span>
+                  </span>
+                </label>
+              </div>
+            </section>
+
             {offers && offers.length > 0 && price !== "" && (
               <section className="flex flex-col">
                 <SectionHead

@@ -230,97 +230,6 @@ export default function AssumptionsSidebar({
         />
       </form>
 
-      {searches.length > 0 && (
-        <div className="flex flex-col gap-[6px] border-t border-rule pt-[18px]">
-          <MicroLabel>Saved searches</MicroLabel>
-          {searches.map((s) => (
-            <div
-              key={s.id}
-              className="flex items-start justify-between gap-2 border-b border-rule pb-[7px]"
-            >
-              <button
-                type="button"
-                onClick={() => onLoadSearch(s)}
-                title="Re-run this analysis with the saved price, bedrooms and assumptions"
-                className="flex min-w-0 cursor-pointer flex-col items-start gap-[1px] text-left"
-              >
-                <span className="w-full truncate text-[12.5px] text-ink hover:text-accent">
-                  {s.name}
-                </span>
-                <span className="text-[11px] text-label">
-                  ${s.price.toLocaleString("en-US")} · {s.bedrooms} bed ·{" "}
-                  {new Date(s.savedAt).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onDeleteSearch(s.id)}
-                title="Delete saved search"
-                className="cursor-pointer px-1 text-[12px] text-label hover:text-negative"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {history.length > 0 && (
-        <div className="flex flex-col gap-[6px] border-t border-rule pt-[18px]">
-          <MicroLabel>Recent addresses</MicroLabel>
-          {history.slice(0, 5).map((h) => (
-            <button
-              key={h.address}
-              type="button"
-              onClick={() => onAddress(h.address)}
-              title="Fill the address field (also available by typing in the field)"
-              className="cursor-pointer truncate text-left text-[12px] text-body hover:text-accent"
-            >
-              {h.address}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-[9px] border-t border-rule pt-[18px]">
-        <MicroLabel>Data sources</MicroLabel>
-        <div className="flex flex-wrap gap-[6px]">
-          <Chip
-            on
-            label="Census"
-            help="Census Bureau geocoder: turns the address into coordinates, a county and a ZIP code. No key needed."
-          />
-          <Chip
-            on
-            label="FEMA"
-            help="FEMA flood maps: the flood zone at this location, which raises the insurance estimate in high-risk areas. No key needed."
-          />
-          <Chip
-            on={sources?.hud ?? true}
-            label="HUD Fair Market Rent"
-            help="Free token from huduser.gov. Sets the Section 8 rent, and the market rent when no ATTOM estimate exists."
-          />
-          <Chip
-            on={sources?.attom ?? false}
-            label="ATTOM"
-            help="Paid property records: the actual tax bill, bedroom count, value estimate and rental estimate."
-          />
-          <Chip
-            on={sources?.mashvisor ?? false}
-            label="Mashvisor"
-            help="Paid short-term rental data: occupancy, nightly rate and revenue for this area. Without it there is no honest Airbnb scenario."
-          />
-          <Chip
-            on={sources?.countyData ?? false}
-            label="County data"
-            help="Free Census data API key: the county's actual tax rate, median rents by bedroom, rental vacancy and population trend."
-          />
-        </div>
-      </div>
-
       <div className="flex flex-col gap-[18px]">
         <div className="flex items-baseline justify-between border-b border-rule pb-[6px]">
           <span className="font-serif text-[15px] font-medium">Assumptions</span>
@@ -444,6 +353,98 @@ export default function AssumptionsSidebar({
           />
         </div>
       </div>
+
+      {searches.length > 0 && (
+        <div className="flex flex-col gap-[6px] border-t border-rule pt-[18px]">
+          <MicroLabel>Saved searches</MicroLabel>
+          {searches.map((s) => (
+            <div
+              key={s.id}
+              className="flex items-start justify-between gap-2 border-b border-rule pb-[7px]"
+            >
+              <button
+                type="button"
+                onClick={() => onLoadSearch(s)}
+                title="Re-run this analysis with the saved price, bedrooms and assumptions"
+                className="flex min-w-0 cursor-pointer flex-col items-start gap-[1px] text-left"
+              >
+                <span className="w-full truncate text-[12.5px] text-ink hover:text-accent">
+                  {s.name}
+                </span>
+                <span className="text-[11px] text-label">
+                  ${s.price.toLocaleString("en-US")} · {s.bedrooms} bed ·{" "}
+                  {new Date(s.savedAt).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onDeleteSearch(s.id)}
+                title="Delete saved search"
+                className="cursor-pointer px-1 text-[12px] text-label hover:text-negative"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div className="flex flex-col gap-[6px] border-t border-rule pt-[18px]">
+          <MicroLabel>Recent addresses</MicroLabel>
+          {history.slice(0, 5).map((h) => (
+            <button
+              key={h.address}
+              type="button"
+              onClick={() => onAddress(h.address)}
+              title="Fill the address field (also available by typing in the field)"
+              className="cursor-pointer truncate text-left text-[12px] text-body hover:text-accent"
+            >
+              {h.address}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-[9px] border-t border-rule pt-[18px]">
+        <MicroLabel>Data sources</MicroLabel>
+        <div className="flex flex-wrap gap-[6px]">
+          <Chip
+            on
+            label="Census"
+            help="Census Bureau geocoder: turns the address into coordinates, a county and a ZIP code. No key needed."
+          />
+          <Chip
+            on
+            label="FEMA"
+            help="FEMA flood maps: the flood zone at this location, which raises the insurance estimate in high-risk areas. No key needed."
+          />
+          <Chip
+            on={sources?.hud ?? true}
+            label="HUD Fair Market Rent"
+            help="Free token from huduser.gov. Sets the Section 8 rent, and the market rent when no ATTOM estimate exists."
+          />
+          <Chip
+            on={sources?.attom ?? false}
+            label="ATTOM"
+            help="Paid property records: the actual tax bill, bedroom count, value estimate and rental estimate."
+          />
+          <Chip
+            on={sources?.mashvisor ?? false}
+            label="Mashvisor"
+            help="Paid short-term rental data: occupancy, nightly rate and revenue for this area. Without it there is no honest Airbnb scenario."
+          />
+          <Chip
+            on={sources?.countyData ?? false}
+            label="County data"
+            help="Free Census data API key: the county's actual tax rate, median rents by bedroom, rental vacancy and population trend."
+          />
+        </div>
+      </div>
+
     </aside>
   );
 }
