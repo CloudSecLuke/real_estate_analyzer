@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { canPencil, recordPencil } from "@/lib/users";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 import { geocodeAddress } from "@/lib/geocode";
 import { getFmr } from "@/lib/hud";
 import { getFloodZone } from "@/lib/fema";
@@ -15,6 +17,32 @@ import type {
 } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
+  // metering: founders unlimited; paid plans get a monthly allowance;
+  // everyone else gets one free pencil, then a 402 with the reason
+  const user = await verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value);
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const permission = await canPencil(user).catch(() => null);
+  if (!permission) {
+    return NextResponse.json(
+      { error: "Could not check your plan — try again." },
+      { status: 500 }
+    );
+  }
+  if (!permission.allowed) {
+    return NextResponse.json(
+      {
+        error:
+          permission.reason === "quota"
+            ? "You've used this month's pencil allowance."
+            : "You've used your free pencil.",
+        paywall: permission.reason,
+      },
+      { status: 402 }
+    );
+  }
+
   let address: string;
   try {
     const body = await req.json();
@@ -79,6 +107,10 @@ export async function POST(req: NextRequest) {
     } else {
       mashvisor = mashvisorResult;
     }
+
+    await recordPencil(user, permission.source).catch(() => {
+      // metering write failure must never break the analysis
+    });
 
     const payload: AnalyzeResponse = {
       property,

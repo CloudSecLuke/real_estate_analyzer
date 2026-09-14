@@ -12,14 +12,25 @@ export async function proxy(request: NextRequest) {
     request.cookies.get(SESSION_COOKIE)?.value
   );
 
+  // Stripe calls this with its own signature auth — never gate it
+  if (pathname === "/api/billing/webhook") {
+    return NextResponse.next();
+  }
+
   if (user) {
-    if (pathname === "/login" || pathname === "/") {
+    if (pathname === "/login" || pathname === "/signup" || pathname === "/") {
       return NextResponse.redirect(new URL("/app", request.url));
     }
     return NextResponse.next();
   }
 
-  if (pathname === "/" || pathname === "/login" || pathname === "/api/auth/login") {
+  if (
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname === "/signup" ||
+    pathname === "/api/auth/login" ||
+    pathname === "/api/auth/signup"
+  ) {
     return NextResponse.next();
   }
   if (pathname.startsWith("/api/")) {

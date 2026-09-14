@@ -76,7 +76,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [last, setLast] = useState<LastPenciled | null>(null);
   const [nextUrl, setNextUrl] = useState("/app");
-  const [betaNote, setBetaNote] = useState(false);
 
   useEffect(() => {
     setLast(readLastPenciled());
@@ -283,32 +282,21 @@ export default function LoginPage() {
             <span className="h-px flex-1 bg-border" />
           </div>
 
-          <button
-            type="button"
-            onClick={() => setBetaNote(true)}
-            className="w-full cursor-pointer rounded-[7px] border border-input-border bg-card px-4 py-3 text-[14px] font-semibold text-ink hover:border-ink"
+          <Link
+            href="/signup"
+            className="w-full cursor-pointer rounded-[7px] border border-input-border bg-card px-4 py-3 text-center text-[14px] font-semibold text-ink hover:border-ink"
           >
-            Pencil a property without an account
-          </button>
-          {betaNote && (
-            <p className="text-[12.5px] leading-[1.6] text-label">
-              PropPencil is in private beta — analyses need an account so your
-              saved pencils and required return follow you. In the meantime,{" "}
-              <Link href="/#score" className="font-semibold text-accent">
-                see the example analysis
-              </Link>{" "}
-              or ask for an invite below.
-            </p>
-          )}
+            Create a free account — your first pencil is on us
+          </Link>
 
           <p className="text-center text-[13px] leading-[1.6] text-label">
             New here?{" "}
-            <a
-              href="mailto:luke.f.miller.8@gmail.com?subject=PropPencil%20account"
+            <Link
+              href="/signup"
               className="font-semibold text-accent hover:text-link-hover"
             >
               Create an account
-            </a>{" "}
+            </Link>{" "}
             to save properties and set your required return.
           </p>
         </div>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCredentials } from "@/lib/auth";
+import { createUser, isUsersDbConfigured } from "@/lib/users";
 import {
   createSessionToken,
   SESSION_COOKIE,
@@ -7,33 +7,37 @@ import {
 } from "@/lib/session";
 
 export async function POST(req: NextRequest) {
+  if (!isUsersDbConfigured()) {
+    return NextResponse.json(
+      { error: "Sign-ups are not available right now." },
+      { status: 503 }
+    );
+  }
   let username = "";
   let password = "";
-  let remember = true;
+  let email: string | null = null;
   try {
     const body = await req.json();
     username = String(body.username ?? "").trim().toLowerCase();
     password = String(body.password ?? "");
-    remember = body.remember !== false;
+    email = body.email ? String(body.email).trim().slice(0, 200) : null;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  if (!(await verifyCredentials(username, password))) {
-    return NextResponse.json(
-      { error: "Invalid username or password." },
-      { status: 401 }
-    );
+  const result = await createUser(username, password, email);
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
+  // sign the new account straight in
   const res = NextResponse.json({ user: username });
   res.cookies.set(SESSION_COOKIE, await createSessionToken(username), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    // "Keep me signed in" unchecked → session cookie (gone on browser close)
-    ...(remember ? { maxAge: SESSION_MAX_AGE } : {}),
+    maxAge: SESSION_MAX_AGE,
   });
   return res;
 }

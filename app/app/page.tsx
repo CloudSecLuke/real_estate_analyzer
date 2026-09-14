@@ -225,13 +225,40 @@ function WhyRating({ s, units }: { s: ScenarioResult; units: number }) {
   );
 }
 
+interface BillingStatus {
+  plan: "free" | "investor" | "founder";
+  planStatus?: string;
+  freeRemaining: number | null;
+  monthlyRemaining: number | null;
+  billingConfigured?: boolean;
+  limits?: { free: number; investorMonthly: number; investorPriceUsd: number };
+}
+
+function planLine(b: BillingStatus): string {
+  if (b.plan === "founder") return "Founder · unlimited pencils";
+  if (b.plan === "investor")
+    return `Investor plan · ${b.monthlyRemaining ?? "—"} of ${
+      b.limits?.investorMonthly ?? 100
+    } pencils left this month`;
+  const free = b.freeRemaining ?? 0;
+  return free > 0
+    ? `Free plan · ${free} free pencil${free === 1 ? "" : "s"} left`
+    : "Free plan · free pencil used";
+}
+
 function AccountMenu({
   user,
   persistent,
+  billing,
+  onUpgrade,
+  onManageBilling,
   onSignOut,
 }: {
   user: string | null;
   persistent: boolean;
+  billing: BillingStatus | null;
+  onUpgrade: () => void;
+  onManageBilling: () => void;
   onSignOut: () => void;
 }) {
   if (!user) return null;
@@ -255,6 +282,29 @@ function AccountMenu({
             {persistent ? "synced to your account" : "saved on this device only"}
           </span>
         </div>
+        {billing && (
+          <div className="flex flex-col gap-[6px] border-t border-border pt-2">
+            <span className="text-[11.5px] leading-[1.45] text-body">
+              {planLine(billing)}
+            </span>
+            {billing.plan === "free" && (
+              <button
+                onClick={onUpgrade}
+                className="cursor-pointer rounded-[7px] bg-pencil px-3 py-[6px] text-left text-[12px] font-bold text-ink hover:bg-pencil-dark"
+              >
+                Upgrade — ${billing.limits?.investorPriceUsd ?? 19}/mo
+              </button>
+            )}
+            {billing.plan === "investor" && (
+              <button
+                onClick={onManageBilling}
+                className="cursor-pointer rounded-[7px] border border-input-border bg-paper px-3 py-[6px] text-left text-[12px] font-semibold text-ink hover:border-ink"
+              >
+                Manage billing
+              </button>
+            )}
+          </div>
+        )}
         <button
           onClick={onSignOut}
           className="cursor-pointer rounded-[7px] border border-input-border bg-paper px-3 py-[6px] text-left text-[12px] font-semibold text-negative hover:border-negative"
@@ -297,13 +347,68 @@ export default function Home() {
   const [searches, setSearches] = useState<SavedSearch[]>([]);
   const [justSaved, setJustSaved] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
+  const [paywall, setPaywall] = useState<"upgrade" | "quota" | null>(null);
+  const [billingNote, setBillingNote] = useState<string | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+
+  const refreshBilling = () =>
+    fetch("/api/billing/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => b && setBilling(b))
+      .catch(() => {});
 
   useEffect(() => {
     fetch("/api/sources")
       .then((r) => r.json())
       .then(setSources)
       .catch(() => {});
+    refreshBilling();
+    // Back from Stripe Checkout: ?billing=success|cancelled
+    const q = new URLSearchParams(window.location.search).get("billing");
+    if (q === "success") {
+      setBillingNote(
+        "You're on the Investor plan — 100 pencils a month. Happy penciling."
+      );
+      // the webhook may land a beat after the redirect; re-check shortly
+      setTimeout(refreshBilling, 4000);
+      window.history.replaceState(null, "", "/app");
+    } else if (q === "cancelled") {
+      setBillingNote("Checkout cancelled — no charge was made.");
+      window.history.replaceState(null, "", "/app");
+    }
   }, []);
+
+  async function startCheckout() {
+    if (checkoutBusy) return;
+    setCheckoutBusy(true);
+    try {
+      const res = await fetch("/api/billing/checkout", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok || !json.url) {
+        throw new Error(json.error ?? "Could not start checkout.");
+      }
+      window.location.href = json.url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start checkout.");
+      setCheckoutBusy(false);
+    }
+  }
+
+  async function openPortal() {
+    try {
+      const res = await fetch("/api/billing/portal", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok || !json.url) {
+        throw new Error(json.error ?? "Could not open billing portal.");
+      }
+      window.location.href = json.url;
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not open billing portal."
+      );
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -424,6 +529,7 @@ export default function Home() {
     setPhase("loading");
     setLoadStep(0);
     setError(null);
+    setPaywall(null);
     setAutoFilled(null);
     if (stepTimer.current) clearInterval(stepTimer.current);
     stepTimer.current = setInterval(() => {
@@ -436,6 +542,16 @@ export default function Home() {
         body: JSON.stringify({ address: target }),
       });
       const json = await res.json();
+      if (res.status === 402) {
+        setPaywall(json.paywall === "quota" ? "quota" : "upgrade");
+        setPhase(data ? "results" : "empty");
+        refreshBilling();
+        if (stepTimer.current) {
+          clearInterval(stepTimer.current);
+          stepTimer.current = null;
+        }
+        return;
+      }
       if (!res.ok) throw new Error(json.error ?? "Penciling failed");
       const resp = json as AnalyzeResponse;
       const listing = resp.mashvisor?.listing;
@@ -487,6 +603,7 @@ export default function Home() {
       setStrategy("auto");
       setLoadStep(8);
       setPhase("results");
+      refreshBilling(); // a pencil was just spent — keep the menu count honest
     } catch (err) {
       setError(err instanceof Error ? err.message : "Penciling failed");
       setPhase(data ? "results" : "empty");
@@ -757,7 +874,7 @@ export default function Home() {
           >
             {sidebarOpen ? "Close" : "Inputs"}
           </button>
-          <AccountMenu user={user} persistent={persistent} onSignOut={signOut} />
+          <AccountMenu user={user} persistent={persistent} billing={billing} onUpgrade={startCheckout} onManageBilling={openPortal} onSignOut={signOut} />
         </div>
       </div>
       <div className={`${sidebarOpen ? "block" : "hidden"} lg:block`}>
@@ -889,12 +1006,88 @@ export default function Home() {
               ))}
             </div>
           </details>
-          <AccountMenu user={user} persistent={persistent} onSignOut={signOut} />
+          <AccountMenu user={user} persistent={persistent} billing={billing} onUpgrade={startCheckout} onManageBilling={openPortal} onSignOut={signOut} />
         </div>
 
         {error && (
           <div className="rounded-[8px] border border-[#f0dba8] border-l-4 border-l-negative bg-accent-tint px-4 py-[14px]">
             <span className="text-[13px] font-bold text-warn-ink">{error}</span>
+          </div>
+        )}
+
+        {billingNote && (
+          <div className="flex items-start justify-between gap-3 rounded-[8px] border border-border border-l-4 border-l-pencil bg-card px-4 py-[14px]">
+            <span className="text-[13px] font-semibold text-ink">
+              {billingNote}
+            </span>
+            <button
+              onClick={() => setBillingNote(null)}
+              className="cursor-pointer text-[12px] text-label hover:text-ink"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {paywall && (
+          <div className="flex flex-col gap-[14px] rounded-[10px] border border-border border-l-4 border-l-pencil bg-card px-5 py-[18px]">
+            <div className="flex flex-col gap-[4px]">
+              <span className="text-[15px] font-extrabold tracking-[-.01em] text-ink">
+                {paywall === "quota"
+                  ? "You've used all 100 pencils this month."
+                  : "Your free pencil is used — keep penciling for $19/mo."}
+              </span>
+              <p className="max-w-[64ch] text-[13px] leading-[1.6] text-body">
+                {paywall === "quota"
+                  ? "Your Investor plan includes 100 full analyses each month, and the counter resets on your billing date. Your saved pencils and assumptions are untouched — you just can't run new addresses until the reset."
+                  : `Every analysis pulls live data — HUD rents, county taxes, market comps — which is what your plan pays for. The Investor plan is $${
+                      billing?.limits?.investorPriceUsd ?? 19
+                    } a month for ${
+                      billing?.limits?.investorMonthly ?? 100
+                    } pencils, cancel any time. Your saved pencils and assumptions stay either way.`}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-[10px]">
+              {paywall === "upgrade" &&
+                (billing?.billingConfigured === false ? (
+                  <span className="text-[12.5px] font-semibold text-label">
+                    Paid plans are opening shortly — email{" "}
+                    <a
+                      href="mailto:luke.f.miller.8@gmail.com?subject=PropPencil%20Investor%20plan"
+                      className="text-accent underline"
+                    >
+                      luke.f.miller.8@gmail.com
+                    </a>{" "}
+                    and we&apos;ll set you up.
+                  </span>
+                ) : (
+                  <button
+                    onClick={startCheckout}
+                    disabled={checkoutBusy}
+                    className="cursor-pointer rounded-[7px] bg-pencil px-4 py-[9px] text-[13px] font-extrabold text-ink hover:bg-pencil-dark disabled:opacity-60"
+                  >
+                    {checkoutBusy
+                      ? "Opening checkout…"
+                      : `Upgrade to Investor — $${
+                          billing?.limits?.investorPriceUsd ?? 19
+                        }/mo`}
+                  </button>
+                ))}
+              {paywall === "quota" && (
+                <button
+                  onClick={openPortal}
+                  className="cursor-pointer rounded-[7px] border border-input-border bg-paper px-4 py-[9px] text-[13px] font-semibold text-ink hover:border-ink"
+                >
+                  Manage billing
+                </button>
+              )}
+              <button
+                onClick={() => setPaywall(null)}
+                className="cursor-pointer px-2 py-[9px] text-[12.5px] font-semibold text-label hover:text-ink"
+              >
+                Not now
+              </button>
+            </div>
           </div>
         )}
 

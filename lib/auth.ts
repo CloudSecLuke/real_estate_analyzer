@@ -1,18 +1,16 @@
 import { scryptSync, timingSafeEqual } from "node:crypto";
+import { verifyDbUser } from "./users";
 
-// Deliberately minimal auth: exactly two accounts, password hashes in env
-// (scrypt, "salthex:hashhex"), no user table. Sessions are signed cookies
-// (lib/session.ts). Swap for a real provider if accounts ever multiply.
+// Auth: the two founder accounts live as scrypt hashes in env vars
+// ("salthex:hashhex"); self-serve accounts live in Postgres (lib/users.ts).
+// Sessions are signed cookies (lib/session.ts) either way.
 
 const USER_HASH_ENV: Record<string, string> = {
   "luke.miller": "AUTH_HASH_LUKE",
   "bart.miller": "AUTH_HASH_BART",
 };
 
-export function verifyCredentials(
-  username: string,
-  password: string
-): boolean {
+function verifyFounder(username: string, password: string): boolean {
   const envName = USER_HASH_ENV[username];
   if (!envName || !password) return false;
   const stored = process.env[envName];
@@ -26,4 +24,13 @@ export function verifyCredentials(
     p: 1,
   });
   return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+export async function verifyCredentials(
+  username: string,
+  password: string
+): Promise<boolean> {
+  if (!password) return false;
+  if (USER_HASH_ENV[username]) return verifyFounder(username, password);
+  return verifyDbUser(username, password);
 }

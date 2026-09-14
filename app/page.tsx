@@ -14,6 +14,7 @@ const NAV_LINKS = [
   ["#score", "Pencil Score"],
   ["#price", "Max buy price"],
   ["#strategies", "Section 8"],
+  ["#pricing", "Pricing"],
 ] as const;
 
 const SOURCE_CHIPS = [
@@ -570,6 +571,106 @@ export default function Landing() {
           </div>
         </section>
 
+        {/* pricing */}
+        <section id="pricing" className="scroll-mt-[76px] border-t border-border">
+          <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-[30px] px-8 py-16 max-md:px-5">
+            <div className="flex max-w-[62ch] flex-col gap-3">
+              <Eyebrow>Pricing</Eyebrow>
+              <h2 className="text-[40px] font-extrabold leading-[1.08] tracking-[-.035em] [text-wrap:pretty] max-md:text-[30px]">
+                Try one on us. Then it&apos;s $19 a month.
+              </h2>
+              <p className="max-w-[58ch] text-[17px] leading-[1.6] text-body [text-wrap:pretty]">
+                Every pencil pulls live data — HUD rents, county taxes,
+                comparable sales, short-term rental demand. Those lookups cost
+                real money, so the pricing is simple: your first full analysis
+                is free, and the Investor plan covers a serious month of deal
+                hunting for less than one home inspection.
+              </p>
+            </div>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-[14px] lg:max-w-[760px]">
+              <div className="flex flex-col gap-[16px] rounded-[12px] border border-border bg-card p-7">
+                <div className="flex flex-col gap-[4px]">
+                  <h3 className="text-[17px] font-bold tracking-[-.02em]">Free</h3>
+                  <div className="flex items-baseline gap-[6px]">
+                    <span className="text-[38px] font-extrabold leading-none tracking-[-.04em]">$0</span>
+                  </div>
+                  <span className="text-[13px] text-label">
+                    1 full analysis when you sign up
+                  </span>
+                </div>
+                <ul className="flex flex-col gap-[9px] text-[13.5px] leading-[1.5] text-body">
+                  <li className="flex gap-2">
+                    <span className="font-extrabold text-positive">✓</span> The
+                    complete pencil — score, max buy price, all three strategies
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-extrabold text-positive">✓</span> Saved
+                    pencils and assumptions, synced to your account
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-extrabold text-positive">✓</span> No
+                    card required
+                  </li>
+                </ul>
+                <Link
+                  href="/signup"
+                  className="mt-auto rounded-[7px] border border-input-border bg-paper px-4 py-[11px] text-center text-[14px] font-bold text-ink hover:border-ink"
+                >
+                  Pencil one free
+                </Link>
+              </div>
+              <div className="relative flex flex-col gap-[16px] rounded-[12px] border-2 border-ink bg-card p-7">
+                <span className="absolute -top-[11px] left-6 rounded-[5px] bg-pencil px-[9px] py-[3px] text-[10.5px] font-bold uppercase tracking-[.05em] text-ink">
+                  For deal hunters
+                </span>
+                <div className="flex flex-col gap-[4px]">
+                  <h3 className="text-[17px] font-bold tracking-[-.02em]">Investor</h3>
+                  <div className="flex items-baseline gap-[6px]">
+                    <span className="text-[38px] font-extrabold leading-none tracking-[-.04em]">$19</span>
+                    <span className="text-[14px] font-semibold text-label">/ month</span>
+                  </div>
+                  <span className="text-[13px] text-label">
+                    100 pencils a month · about 19¢ each
+                  </span>
+                </div>
+                <ul className="flex flex-col gap-[9px] text-[13.5px] leading-[1.5] text-body">
+                  <li className="flex gap-2">
+                    <span className="font-extrabold text-positive">✓</span>{" "}
+                    Everything in Free, 100 times a month
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-extrabold text-positive">✓</span>{" "}
+                    Live comparable sales, rent estimates and short-term rental
+                    demand where available
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-extrabold text-positive">✓</span>{" "}
+                    Offer-price solver, stress test and 5-year hold projection
+                    on every pencil
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-extrabold text-positive">✓</span>{" "}
+                    Cancel any time — your saved pencils stay
+                  </li>
+                </ul>
+                <Link
+                  href="/signup"
+                  className="mt-auto rounded-[7px] bg-pencil px-4 py-[11px] text-center text-[14px] font-extrabold text-ink hover:bg-pencil-dark"
+                >
+                  Start with the free pencil
+                </Link>
+              </div>
+            </div>
+            <p className="max-w-[88ch] text-[13.5px] leading-[1.6] text-label">
+              Why a limit at all? Each analysis fans out to paid data
+              providers on your behalf. The Investor plan is priced to cover
+              those calls with a little left over to keep the lights on — not
+              to squeeze you. If you routinely need more than 100 pencils a
+              month, get in touch and we&apos;ll work something out.
+            </p>
+          </div>
+        </section>
+
         {/* closing CTA */}
         <section className="border-t border-border">
           <div className="mx-auto flex w-full max-w-[1180px] flex-col items-center gap-[22px] px-8 py-[72px] text-center max-md:px-5">
@@ -626,9 +727,12 @@ export default function Landing() {
               <Link href="/app" className="text-[13px] text-[#e8e5dd] hover:text-on-dark">
                 Pencil a Property
               </Link>
-              <a href="#price" className="text-[13px] text-[#e8e5dd] hover:text-on-dark">
+              <a href="#pricing" className="text-[13px] text-[#e8e5dd] hover:text-on-dark">
                 Pricing
               </a>
+              <Link href="/signup" className="text-[13px] text-[#e8e5dd] hover:text-on-dark">
+                Create an account
+              </Link>
             </div>
           </div>
         </div>
