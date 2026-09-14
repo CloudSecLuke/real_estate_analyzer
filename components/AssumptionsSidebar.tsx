@@ -1,6 +1,7 @@
 "use client";
 
 import BatchImport from "@/components/BatchImport";
+import InfoTip from "@/components/InfoTip";
 import { AppMark, MarkOnLight } from "@/components/PencilMark";
 import type {
   Assumptions,
@@ -55,8 +56,9 @@ function Row({
 }) {
   return (
     <label className="flex items-center justify-between gap-2 text-[12.5px] text-body">
-      <span title={help} className={help ? "cursor-help" : undefined}>
+      <span className="flex items-center">
         {label}
+        {help && <InfoTip text={help} />}
       </span>
       <span className="flex items-center gap-[5px]">
         <input
@@ -324,7 +326,7 @@ export default function AssumptionsSidebar({
             unit="% rent"
             value={adv.capexPctOfRent}
             onChange={(v) => setA("capexPctOfRent", v === "" ? 0 : v)}
-            help="Money set aside each month for roof, HVAC and other big-ticket replacements."
+            help="CapEx = capital expenditures: the big-ticket replacements a house needs every 15–25 years — roof, furnace/AC, water heater, siding. This reserve treats those future bills as a monthly cost today, so one roof doesn't erase years of paper profit. Distinct from routine maintenance."
           />
           <Row label="Management" unit="%" value={adv.managementPct} onChange={(v) => setA("managementPct", v === "" ? 0 : v)} />
           <Row

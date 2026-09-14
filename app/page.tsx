@@ -82,6 +82,9 @@ const usd = (n: number, digits = 0) =>
 
 const cfClass = (n: number) => (n > 0 ? "text-positive" : "text-negative");
 
+const CAPEX_TIP =
+  "CapEx = capital expenditures: the big-ticket replacements a house needs every 15–25 years — roof, furnace/AC, water heater, siding. The reserve treats those future bills as a monthly cost today, so one roof doesn't erase years of paper profit. Distinct from routine maintenance.";
+
 const OUTLINE_BTN =
   "cursor-pointer rounded-[7px] border border-input-border bg-card px-[14px] py-[9px] text-[12.5px] font-semibold text-ink hover:border-ink";
 
@@ -1537,6 +1540,7 @@ export default function Home() {
                         <span className="text-[11.5px] leading-[1.5] text-label">
                           {usdWhole(outflow)} out: mortgage {usdWhole(s.monthlyPI)} · tax{" "}
                           {usdWhole(s.expenses.taxes)} · insurance, maintenance and CapEx{" "}
+                          <InfoTip text={CAPEX_TIP} />{" "}
                           {usdWhole(insMaintCapex)} · management {usdWhole(s.expenses.management)} ·{" "}
                           {r.key === "str"
                             ? `utilities ${usdWhole(s.expenses.other)}`
@@ -1707,8 +1711,7 @@ export default function Home() {
                             usdWhole(s.expenses.taxes + s.expenses.insurance + s.expenses.maintenance)
                           )}
                           {label("CapEx reserve", {
-                            title:
-                              "Money set aside each month for roof, HVAC and other big-ticket replacements — sized to the rent.",
+                            title: CAPEX_TIP,
                           })}
                           {cells((s) => usdWhole(s.expenses.capex))}
                           {label("Management")}
@@ -1834,8 +1837,9 @@ export default function Home() {
                               o.inkRule ? "border-b border-ink" : "border-b border-rule"
                             }`}
                           >
-                            <span className={`text-[13px] ${o.bold ? "font-bold text-ink" : "text-body"}`}>
+                            <span className={`flex items-center text-[13px] ${o.bold ? "font-bold text-ink" : "text-body"}`}>
                               {labelText}
+                              {labelText === "CapEx reserve" && <InfoTip text={CAPEX_TIP} />}
                             </span>
                             <span
                               className={`text-[13.5px] tabular-nums ${o.bold ? "font-bold" : ""} ${o.neg ? "text-negative" : "text-ink"}`}
