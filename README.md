@@ -1,4 +1,4 @@
-# Real Estate Cash Flow Analyzer
+# PropPencil — Rental Cash Flow Analyzer
 
 Analyze rental properties for **monthly cash flow** — the headline metric —
 across two scenarios side by side:

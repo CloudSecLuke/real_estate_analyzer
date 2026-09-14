@@ -5,10 +5,15 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { PinMetrics, SavedPin, ScenarioKey } from "@/lib/types";
 import { RATING_COLORS } from "@/lib/metrics";
+import {
+  tierForLegacyRating,
+  tierForScore,
+  type PencilTier,
+} from "@/lib/pencilScore";
 
 const CINCINNATI: [number, number] = [39.103, -84.512];
-const POS = "#2f6b4f";
-const NEG = "#a33a2b";
+const POS = "#0f6b44";
+const NEG = "#a8281e";
 
 const usd = (n: number) =>
   n.toLocaleString("en-US", {
@@ -20,10 +25,15 @@ const usd = (n: number) =>
 const signed = (n: number) =>
   (n >= 0 ? "+" : "−") + "$" + Math.abs(Math.round(n)).toLocaleString("en-US");
 
+function tierOf(m: PinMetrics | undefined): PencilTier | null {
+  if (!m) return null;
+  return m.score != null ? tierForScore(m.score) : tierForLegacyRating(m.rating);
+}
+
 function bestPlay(pin: SavedPin): string {
   const plays: [string, PinMetrics | undefined][] = [
-    ["Market rent", pin.market],
-    ["Section 8", pin.s8],
+    ["Traditional rental", pin.market],
+    ["Section 8 voucher", pin.s8],
     ["Short-term rental", pin.str],
   ];
   let best: string | null = null;
@@ -39,7 +49,7 @@ function bestPlay(pin: SavedPin): string {
 
 function scenarioMini(label: string, m: PinMetrics | undefined): string {
   if (!m) return "";
-  return `<div style="font-size:11px;color:#6b6257">${label} ${signed(m.monthlyCashFlow)}/mo · ${m.rating}${m.almost ? ` (almost ${m.almost}${m.gapText ? ", " + m.gapText : ""})` : ""}</div>`;
+  return `<div style="font-size:11px;color:#5f5f5c">${label} ${signed(m.monthlyCashFlow)}/mo${m.score != null ? ` · score ${m.score}` : ` · ${m.rating}`}${m.almost ? ` (almost ${m.almost}${m.gapText ? ", " + m.gapText : ""})` : ""}</div>`;
 }
 
 export default function PropertyMap({
@@ -67,10 +77,7 @@ export default function PropertyMap({
     if (map.getSize().x < 50) return; // unsized: any fit would be wrong
     const pts = pinsRef.current.map((p) => [p.lat, p.lon] as [number, number]);
     if (!pts.length) return;
-    map.fitBounds(L.latLngBounds(pts).pad(0.3), {
-      maxZoom: 14,
-      animate: false,
-    });
+    map.fitBounds(L.latLngBounds(pts).pad(0.3), { maxZoom: 14, animate: false });
   };
 
   useEffect(() => {
@@ -133,28 +140,30 @@ export default function PropertyMap({
 
     for (const pin of pins) {
       const metrics = pin[colorBy] ?? pin.market ?? pin.s8 ?? pin.str;
-      const color = metrics ? RATING_COLORS[metrics.rating] : "#6b6257";
-      // Near-miss deals keep their ring in the next tier's color so the
-      // nuance stays visible on the map itself.
+      const tier = tierOf(metrics);
+      const color = tier?.dot ?? "#8a8780";
+      // Near-miss deals keep their ring in the legacy next-tier color so
+      // the nuance stays visible on the map itself.
       const almostColor = metrics?.almost ? RATING_COLORS[metrics.almost] : null;
       const marker = L.circleMarker([pin.lat, pin.lon], {
-        radius: 9,
-        color: almostColor ?? "#fdfbf7",
+        radius: 10,
+        color: almostColor ?? "#fffefb",
         weight: almostColor ? 3.5 : 2.5,
         fillColor: color,
         fillOpacity: 1,
       }).bindPopup(
-        `<div style="font-family:'Fira Sans',Helvetica,sans-serif;min-width:190px">
-          <div style="font-family:Newsreader,Georgia,serif;font-weight:500;font-size:15px">${pin.address}</div>
-          <div style="color:#6b6257;font-size:11.5px;margin-top:2px">${usd(pin.price)} · ${pin.bedrooms} BR · best play ${bestPlay(pin)}</div>
-          <div style="margin-top:7px;display:flex;align-items:center;gap:7px">
-            <span style="color:${metrics && metrics.monthlyCashFlow > 0 ? POS : NEG};font-weight:600;font-size:13px">${metrics ? signed(metrics.monthlyCashFlow) + "/mo" : "—"}</span>
-            <span style="background:${color};color:#fdfbf7;border-radius:2px;padding:2px 7px;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase">${metrics?.rating ?? "—"}</span>
+        `<div style="font-family:'Plus Jakarta Sans',sans-serif;min-width:186px">
+          <div style="font-weight:700;font-size:14px;letter-spacing:-.02em">${pin.address}</div>
+          <div style="color:#5f5f5c;font-size:11.5px;margin-top:2px">${usd(pin.price)} · ${pin.bedrooms} bed${pin.investorValue != null ? ` · investor value ${usd(pin.investorValue)}` : ""} · best play ${bestPlay(pin)}</div>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+            ${metrics?.score != null ? `<span style="font-size:20px;font-weight:800;letter-spacing:-.03em">${metrics.score}</span>` : ""}
+            ${tier ? `<span style="background:${tier.bg};color:${tier.fg};border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap">${tier.label}</span>` : ""}
           </div>
+          <div style="margin-top:5px;font-size:12px;font-weight:700;color:${metrics && metrics.monthlyCashFlow > 0 ? POS : NEG}">${metrics ? signed(metrics.monthlyCashFlow) + "/mo cash flow" : "—"}</div>
           <div style="margin-top:6px">
-            ${scenarioMini("Market", pin.market)}
+            ${scenarioMini("Traditional", pin.market)}
             ${scenarioMini("Section 8", pin.s8)}
-            ${scenarioMini("Airbnb", pin.str)}
+            ${scenarioMini("Short-term", pin.str)}
           </div>
         </div>`
       );
@@ -178,7 +187,7 @@ export default function PropertyMap({
   return (
     <div
       ref={containerRef}
-      className="z-0 h-[400px] w-full border border-input-border bg-sidebar"
+      className="z-0 h-[400px] w-full rounded-[10px] border border-border bg-sidebar"
     />
   );
 }

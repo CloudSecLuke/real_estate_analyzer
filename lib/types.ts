@@ -145,6 +145,9 @@ export interface Assumptions {
   // 5-year hold projection
   appreciationPctAnnual: number;
   sellingCostPct: number; // agent + closing on exit
+  // PropPencil additions
+  capexPctOfRent: number; // monthly reserve for roof/HVAC etc., % of rent
+  targetCocPct: number; // required cash-on-cash — drives investor value + score
 }
 
 // Which scenario a pin/map view is keyed to
@@ -183,6 +186,7 @@ export interface SavedPin {
   market?: PinMetrics;
   s8?: PinMetrics;
   str?: PinMetrics;
+  investorValue?: number; // at save time, for the active strategy
 }
 
 export interface PinMetrics {
@@ -193,6 +197,7 @@ export interface PinMetrics {
   capRatePct: number;
   cashOnCashPct: number;
   rent: number;
+  score?: number; // Pencil Score 0-100, when computed at save time
 }
 
 export interface RatingGap {
@@ -279,6 +284,7 @@ export interface ScenarioResult {
     taxes: number; // monthly
     insurance: number;
     maintenance: number;
+    capex: number; // CapEx reserve (roof/HVAC), % of rent
     management: number;
     vacancy: number;
     other: number;

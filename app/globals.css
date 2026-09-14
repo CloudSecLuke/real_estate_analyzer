@@ -1,71 +1,68 @@
 @import "tailwindcss";
 
-/* Design tokens from the redesign handoff. Every ink token passes 4.5:1
-   against both the paper and sidebar grounds — do not lighten. */
+/* PropPencil design tokens. Token NAMES are kept from the previous theme
+   wherever a role matches, so existing components restyle automatically;
+   values are the PropPencil palette. Every ink token passes 4.5:1 on paper,
+   sidebar and card grounds — do not lighten. */
 @theme {
   /* grounds */
-  --color-paper: #faf7f2;
-  --color-sidebar: #f2ece2;
-  --color-field: #fdfbf7;
-  --color-accent-tint: #f6efe2;
+  --color-paper: #fbf9f4;
+  --color-sidebar: #f5f2ea;
+  --color-field: #fffefb; /* card / input ground */
+  --color-card: #fffefb;
+  --color-ink-panel: #171717; /* the inverted "What should you pay?" panel */
+  --color-accent-tint: #fdf6e4; /* warning fills */
 
   /* ink */
-  --color-ink: #1d1a16;
-  --color-prose: #3c352c;
-  --color-body: #574f45;
-  --color-label: #6b6257;
-  --color-disabled: #7a7165;
+  --color-ink: #171717;
+  --color-prose: #3b3b38;
+  --color-body: #3b3b38;
+  --color-label: #5f5f5c;
+  --color-disabled: #8a8780;
+  --color-on-dark: #fffefb;
+  --color-on-dark-dim: #b8b5ac;
 
   /* lines */
-  --color-rule: #e0d7c8;
-  --color-rule-light: #ece4d8;
-  --color-input-border: #d9cfbe;
-  --color-marker-border: #a89c88;
-  --color-bar-track: #e6ded1;
+  --color-rule: #eae4d6;
+  --color-rule-light: #eae4d6;
+  --color-border: #e3ddcf;
+  --color-input-border: #ddd6c6;
+  --color-marker-border: #c2b9a5;
+  --color-bar-track: #efe9db;
 
-  /* accent */
-  --color-accent: #96552a;
-  --color-accent-hover: #7d4622;
-  --color-link-hover: #6f3d1c;
+  /* brand accent — yellow is FILLS ONLY, never text on light grounds.
+     --color-accent is amber ink, yellow's readable sibling, for links,
+     eyebrows and warning text. */
+  --color-pencil: #f4c542;
+  --color-pencil-dark: #e3b32c;
+  --color-accent: #8a5a0b;
+  --color-accent-hover: #6b4508;
+  --color-link-hover: #6b4508;
 
   /* semantic */
-  --color-positive: #2f6b4f;
-  --color-negative: #a33a2b;
+  --color-positive: #0f6b44;
+  --color-negative: #a8281e;
+  --color-warn: #8a5a0b;
+  --color-warn-ink: #4a3208;
 
   /* source chips */
   --color-chip-on: #e8f0e9;
-  --color-chip-on-border: #c6d8c9;
-  --color-chip-off: #f6efe2;
-  --color-chip-off-border: #e0c894;
-  --color-chip-off-text: #8a6a1f;
+  --color-chip-on-border: #c3d8c8;
+  --color-chip-on-text: #2f4f3a;
+  --color-chip-off: #fdf6e4;
+  --color-chip-off-border: #e8d3a0;
+  --color-chip-off-text: #6b4508;
 
-  /* warning fills */
-  --color-warn: #8c5b10;
-  --color-warn-ink: #4a3a1f;
-
-  /* expense bar segments */
-  --color-seg-mortgage: #96552a;
-  --color-seg-tax: #b4794c;
-  --color-seg-insurance: #c9a077;
-  --color-seg-management: #6b6257;
-  --color-seg-vacancy: #b9b0a2;
-
-  /* seasonality bars */
-  --color-season-low: #ddd3c2;
-  --color-season-mid: #c9a077;
-  --color-season-peak: #96552a;
-
-  --color-skeleton: #ede5d8;
+  --color-skeleton: #efe9db;
 
   /* fonts */
-  --font-serif: var(--font-newsreader), Georgia, serif;
-  --font-sans: var(--font-fira-sans), Helvetica, sans-serif;
+  --font-sans: var(--font-jakarta), Helvetica, sans-serif;
 }
 
 body {
-  background: #faf7f2;
-  color: #1d1a16;
-  font-family: var(--font-fira-sans), Helvetica, sans-serif;
+  background: #fbf9f4;
+  color: #171717;
+  font-family: var(--font-jakarta), Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -79,19 +76,63 @@ input[type="number"] {
   appearance: textfield;
 }
 
-.leaflet-container {
-  font-family: var(--font-fira-sans), Helvetica, sans-serif;
+/* the required-return slider: yellow thumb ringed in graphite */
+input[type="range"].pp-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 26px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"].pp-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #e7e2d6;
+}
+input[type="range"].pp-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: #f4c542;
+  border: 2px solid #171717;
+}
+input[type="range"].pp-range::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #e7e2d6;
+}
+input[type="range"].pp-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f4c542;
+  border: 2px solid #171717;
 }
 
-@keyframes pulse {
+.leaflet-container {
+  font-family: var(--font-jakarta), Helvetica, sans-serif;
+}
+
+@keyframes pp-pulse {
   0%,
   100% {
-    opacity: 0.35;
+    opacity: 0.3;
   }
   50% {
     opacity: 1;
   }
 }
 .animate-step-pulse {
-  animation: pulse 1s ease-in-out infinite;
+  animation: pp-pulse 1s ease-in-out infinite;
+}
+
+/* every number in the app: figures must not jitter as the slider moves */
+.tabular-nums,
+input,
+td,
+th {
+  font-variant-numeric: tabular-nums;
 }

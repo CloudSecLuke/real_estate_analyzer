@@ -1,35 +1,22 @@
 import type { Metadata } from "next";
-import { Newsreader, Fira_Sans } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 
-// Newsreader carries everything a human reads or cares about (headings,
-// verdict prose, money figures); Fira Sans carries the UI (labels, inputs,
-// tables, captions).
-const newsreader = Newsreader({
-  variable: "--font-newsreader",
+const jakarta = Plus_Jakarta_Sans({
+  variable: "--font-jakarta",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  style: ["normal", "italic"],
-});
-
-const firaSans = Fira_Sans({
-  variable: "--font-fira-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
-  title: "Rental Cash Flow Analyzer",
+  title: "PropPencil — does it pencil?",
   description:
-    "Analyze rental properties for monthly cash flow — market-rate, Section 8 and short-term — using HUD, FEMA, Census, ATTOM and Mashvisor data.",
+    "PropPencil turns any property into an investor-ready deal analysis: value, rent, cash flow, expenses, returns and risk across three tenant strategies.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${newsreader.variable} ${firaSans.variable} h-full antialiased`}
-    >
+    <html lang="en" className={`${jakarta.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

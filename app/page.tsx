@@ -10,23 +10,37 @@ import {
 } from "@/lib/metrics";
 import { computeScenariosFromData, buildPin, stressTest } from "@/lib/scenarios";
 import { nextTierUp, solveOfferPrices } from "@/lib/offer";
+import { investorValue as solveInvestorValue } from "@/lib/investorValue";
+import {
+  dscrOf,
+  pencilScore,
+  PENCIL_TIERS,
+  scoreParts,
+  tierForLegacyRating,
+  tierForScore,
+  type PencilTier,
+} from "@/lib/pencilScore";
+import { buildConfidence, CONF_PILL } from "@/lib/confidence";
 import {
   bandNote,
-  buildVerdict,
+  buildPencilVerdict,
   DISPLAY_LABEL,
-  ladderEyebrow,
   MARKET_SRC_LABEL,
   rankScenarios,
   signedUsd,
+  TAB_LABEL,
   usdWhole,
   pct1,
+  whyAndRisks,
   type RankedScenario,
+  type ScenarioKey3,
 } from "@/lib/verdict";
 import AssumptionsSidebar, {
   type SourceStatus,
 } from "@/components/AssumptionsSidebar";
 import FidelityCheck from "@/components/FidelityCheck";
 import InfoTip from "@/components/InfoTip";
+import { AppMark } from "@/components/PencilMark";
 import type {
   AnalyzeResponse,
   Assumptions,
@@ -43,11 +57,10 @@ import type {
 const PropertyMap = dynamic(() => import("@/components/PropertyMap"), {
   ssr: false,
   loading: () => (
-    <div className="h-[400px] w-full animate-pulse border border-input-border bg-sidebar" />
+    <div className="h-[400px] w-full animate-pulse rounded-[10px] border border-border bg-sidebar" />
   ),
 });
 
-const ALL_RATINGS: Rating[] = ["Rare", "Fantastic", "Great", "Good", "Poor"];
 const PINS_KEY = "rea_saved_pins_v1";
 const HISTORY_KEY = "rea_history_v1";
 const SEARCHES_KEY = "rea_searches_v1";
@@ -56,6 +69,7 @@ const SEARCHES_MAX = 30;
 const SAMPLE = { address: "1418 Vine St, Cincinnati, OH 45202", price: 118000, beds: 3 };
 
 type Phase = "empty" | "loading" | "results";
+type Strategy = "auto" | ScenarioKey3;
 
 const usd = (n: number, digits = 0) =>
   n.toLocaleString("en-US", {
@@ -67,14 +81,27 @@ const usd = (n: number, digits = 0) =>
 
 const cfClass = (n: number) => (n > 0 ? "text-positive" : "text-negative");
 
-function RatingBadge({ rating, small }: { rating: Rating; small?: boolean }) {
+const OUTLINE_BTN =
+  "cursor-pointer rounded-[7px] border border-input-border bg-card px-[14px] py-[9px] text-[12.5px] font-semibold text-ink hover:border-ink";
+
+function TierBadge({ tier, small }: { tier: PencilTier; small?: boolean }) {
   return (
     <span
-      className={`rounded-[2px] font-semibold uppercase text-field ${
-        small
-          ? "px-[7px] py-[2px] text-[10px] tracking-[.06em]"
-          : "px-[9px] py-[3px] text-[10.5px] tracking-[.08em]"
+      className={`flex-none whitespace-nowrap rounded-[5px] font-bold uppercase ${
+        small ? "px-[7px] py-[2px] text-[10px] tracking-[.05em]" : "px-[9px] py-[3px] text-[10.5px] tracking-[.05em]"
       }`}
+      style={{ backgroundColor: tier.bg, color: tier.fg, minWidth: "fit-content" }}
+    >
+      {tier.label}
+    </span>
+  );
+}
+
+function LegacyBadge({ rating }: { rating: Rating }) {
+  return (
+    <span
+      title="Legacy threshold rating (Rare ≥ $400/mo cash flow, ≥12% cash-on-cash, ≥8% cap rate; Fantastic ≥ $250/≥10%; Great ≥ $150/≥8%; Good > $50/≥5%)"
+      className="flex-none whitespace-nowrap rounded-[5px] px-[7px] py-[2px] text-[10px] font-bold uppercase tracking-[.05em] text-card"
       style={{ backgroundColor: RATING_COLORS[rating] }}
     >
       {rating}
@@ -85,7 +112,7 @@ function RatingBadge({ rating, small }: { rating: Rating; small?: boolean }) {
 function AlmostChip({ almost }: { almost: Rating }) {
   return (
     <span
-      className="rounded-[2px] border border-dashed px-[7px] py-[2px] text-[10.5px] font-medium"
+      className="flex-none whitespace-nowrap rounded-[5px] border border-dashed px-[7px] py-[2px] text-[10.5px] font-medium"
       style={{ borderColor: RATING_COLORS[almost], color: RATING_COLORS[almost] }}
     >
       Almost {almost}
@@ -93,53 +120,9 @@ function AlmostChip({ almost }: { almost: Rating }) {
   );
 }
 
-const ACTION_BTN =
-  "cursor-pointer rounded-[2px] border border-input-border bg-field px-3 py-[6px] text-[12px] font-semibold text-accent hover:border-accent hover:text-link-hover";
-
-function AccountMenu({
-  user,
-  persistent,
-  onSignOut,
-}: {
-  user: string | null;
-  persistent: boolean;
-  onSignOut: () => void;
-}) {
-  if (!user) return null;
-  const initials = user
-    .split(".")
-    .map((p) => p[0]?.toUpperCase() ?? "")
-    .join("")
-    .slice(0, 2);
-  return (
-    <details className="relative">
-      <summary
-        title={user}
-        className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full border border-input-border bg-field text-[11px] font-semibold text-ink hover:border-accent [&::-webkit-details-marker]:hidden"
-      >
-        {initials || "?"}
-      </summary>
-      <div className="absolute right-0 z-40 mt-1 flex w-48 flex-col gap-2 border border-rule bg-field p-3">
-        <div className="flex flex-col">
-          <span className="text-[12.5px] font-semibold text-ink">{user}</span>
-          <span className="text-[11px] text-label">
-            {persistent ? "synced to your account" : "saved on this device only"}
-          </span>
-        </div>
-        <button
-          onClick={onSignOut}
-          className="cursor-pointer rounded-[2px] border border-input-border bg-paper px-3 py-[6px] text-left text-[12px] font-semibold text-negative hover:border-negative"
-        >
-          Sign out
-        </button>
-      </div>
-    </details>
-  );
-}
-
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
-    <span className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-accent">
+    <span className="text-[10.5px] font-bold uppercase tracking-[.14em] text-accent">
       {children}
     </span>
   );
@@ -155,8 +138,8 @@ function SectionHead({
   right?: React.ReactNode;
 }) {
   return (
-    <div className="mb-1 flex flex-wrap items-baseline justify-between gap-3 border-b-2 border-ink pb-2">
-      <h3 className="font-serif text-[21px] font-medium">{title}</h3>
+    <div className="mb-1 flex flex-wrap items-baseline justify-between gap-3 border-b border-ink pb-[9px]">
+      <h3 className="text-[19px] font-bold tracking-[-.02em]">{title}</h3>
       {caption && <span className="text-[11.5px] text-label">{caption}</span>}
       {right}
     </div>
@@ -170,15 +153,15 @@ function Metric({
 }: {
   label: string;
   value: string;
-  tip: string;
+  tip?: string;
 }) {
   return (
-    <div className="flex flex-col gap-[2px]">
-      <span className="flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-[.07em] text-label">
+    <div className="flex flex-col gap-[1px]">
+      <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-[.07em] text-label">
         {label}
-        <InfoTip text={tip} />
+        {tip && <InfoTip text={tip} />}
       </span>
-      <span className="text-[14.5px] font-medium text-ink">{value}</span>
+      <span className="text-[14px] font-semibold tabular-nums">{value}</span>
     </div>
   );
 }
@@ -211,20 +194,20 @@ function WhyRating({ s, units }: { s: ScenarioResult; units: number }) {
       : []),
   ];
   return (
-    <details className="mt-2 text-[12.5px]">
-      <summary className="cursor-pointer text-label">Why {s.rating}?</summary>
+    <details className="mt-1 text-[12.5px]">
+      <summary className="cursor-pointer text-label">
+        Why {s.rating} (legacy rating)?
+      </summary>
       <p className="mt-1 text-[11.5px] text-label">
         {s.rating === "Poor"
           ? "Fails the minimum (Good) thresholds:"
-          : `Meets every ${s.rating}-tier threshold${
-              s.rating !== "Rare" ? " (but not the next tier up)" : ""
-            }:`}
+          : `Meets every ${s.rating}-tier threshold${s.rating !== "Rare" ? " (but not the next tier up)" : ""}:`}
       </p>
       <table className="mt-1 w-full">
         <tbody>
           {rows.map((r) => (
-            <tr key={r.label} className="border-b border-rule-light">
-              <td className="py-1 text-[#4a423a]">{r.label}</td>
+            <tr key={r.label} className="border-b border-rule">
+              <td className="py-1 text-body">{r.label}</td>
               <td className="py-1 text-right tabular-nums">{r.value}</td>
               <td className="w-20 py-1 text-right text-label">{r.req}</td>
               <td className={`w-5 py-1 text-right ${r.pass ? "text-positive" : "text-negative"}`}>
@@ -234,6 +217,47 @@ function WhyRating({ s, units }: { s: ScenarioResult; units: number }) {
           ))}
         </tbody>
       </table>
+    </details>
+  );
+}
+
+function AccountMenu({
+  user,
+  persistent,
+  onSignOut,
+}: {
+  user: string | null;
+  persistent: boolean;
+  onSignOut: () => void;
+}) {
+  if (!user) return null;
+  const initials = user
+    .split(".")
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("")
+    .slice(0, 2);
+  return (
+    <details className="relative">
+      <summary
+        title={user}
+        className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full border border-input-border bg-card text-[11px] font-bold text-ink hover:border-ink [&::-webkit-details-marker]:hidden"
+      >
+        {initials || "?"}
+      </summary>
+      <div className="absolute right-0 z-40 mt-1 flex w-48 flex-col gap-2 rounded-[8px] border border-border bg-card p-3">
+        <div className="flex flex-col">
+          <span className="text-[12.5px] font-bold text-ink">{user}</span>
+          <span className="text-[11px] text-label">
+            {persistent ? "synced to your account" : "saved on this device only"}
+          </span>
+        </div>
+        <button
+          onClick={onSignOut}
+          className="cursor-pointer rounded-[7px] border border-input-border bg-paper px-3 py-[6px] text-left text-[12px] font-semibold text-negative hover:border-negative"
+        >
+          Sign out
+        </button>
+      </div>
     </details>
   );
 }
@@ -248,24 +272,21 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [autoFilled, setAutoFilled] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceStatus | null>(null);
+  const [strategy, setStrategy] = useState<Strategy>("auto");
   const stepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [adv, setAdv] = useState({ ...DEFAULT_ASSUMPTIONS });
   const setA = <K extends keyof typeof adv>(k: K, v: (typeof adv)[K]) =>
     setAdv((p) => ({ ...p, [k]: v }));
+  const targetCoc = adv.targetCocPct ?? 10;
 
-  // Map state — pins + assumptions persist per-user in Postgres, with
-  // localStorage as offline fallback and one-time migration source
   const [savedPins, setSavedPins] = useState<SavedPin[]>([]);
   const [pinsLoaded, setPinsLoaded] = useState(false);
   const [user, setUser] = useState<string | null>(null);
   const [persistent, setPersistent] = useState(false);
-  const [liveRate, setLiveRate] = useState<{ pct: number; asOf: string } | null>(
-    null
-  );
-  const [colorBy, setColorBy] = useState<ScenarioKey>("market");
-  const [ratingFilter, setRatingFilter] = useState<Set<Rating>>(
-    new Set(ALL_RATINGS)
+  const [liveRate, setLiveRate] = useState<{ pct: number; asOf: string } | null>(null);
+  const [tierFilter, setTierFilter] = useState<Set<string>>(
+    new Set(PENCIL_TIERS.map((t) => t.short))
   );
   const [focusId, setFocusId] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -301,7 +322,6 @@ export default function Home() {
       } catch {
         // server unreachable — run local-only
       }
-      // localStorage fills any gap the server didn't have
       const localFallback = <T,>(key: string, current: T[]): T[] => {
         if (current.length > 0) return current;
         try {
@@ -351,12 +371,7 @@ export default function Home() {
       fetch("/api/pins", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pins: savedPins,
-          assumptions: adv,
-          history,
-          searches,
-        }),
+        body: JSON.stringify({ pins: savedPins, assumptions: adv, history, searches }),
       }).catch(() => {
         // transient save failure — localStorage still has the data
       });
@@ -369,18 +384,19 @@ export default function Home() {
     window.location.href = "/login";
   }
 
-  // The analyzing screen's six steps. /api/analyze is one server call that
-  // fans out internally, so the timer paces the display while the fetch is
-  // in flight and the response completes every step; keys that are not
-  // configured render "skipped · no key" and are never counted as queried.
+  // The eight penciling steps. /api/analyze is one server call that fans
+  // out internally, so the timer paces the display while the fetch is in
+  // flight; keys that are not configured render "skipped · no key".
   const steps = useMemo(
     () => [
-      { label: "Geocoding address", src: "Census", on: true },
-      { label: "Fair Market Rents", src: "HUD", on: sources?.hud ?? true },
-      { label: "Flood zone", src: "FEMA flood maps", on: true },
-      { label: "Property record and tax bill", src: "ATTOM", on: sources?.attom ?? false },
-      { label: "Short-term rental market", src: "Mashvisor", on: sources?.mashvisor ?? false },
-      { label: "Underwriting three scenarios", src: "local", on: true },
+      { label: "Finding the property…", src: "Census", on: true },
+      { label: "Checking comparable sales…", src: "ATTOM", on: sources?.attom ?? false },
+      { label: "Estimating market rent…", src: "ATTOM", on: sources?.attom ?? false },
+      { label: "Checking Section 8 potential…", src: "HUD", on: sources?.hud ?? true },
+      { label: "Checking property taxes…", src: "ATTOM", on: sources?.attom ?? false },
+      { label: "Testing short-term demand…", src: "Mashvisor", on: sources?.mashvisor ?? false },
+      { label: "Modeling financing…", src: "local", on: true },
+      { label: "Penciling the deal…", src: "local", on: true },
     ],
     [sources]
   );
@@ -395,9 +411,8 @@ export default function Home() {
     setAutoFilled(null);
     if (stepTimer.current) clearInterval(stepTimer.current);
     stepTimer.current = setInterval(() => {
-      // hold on the last real fetch step until the response lands
-      setLoadStep((s) => Math.min(s + 1, 4));
-    }, 450);
+      setLoadStep((s) => Math.min(s + 1, 6));
+    }, 400);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -405,11 +420,8 @@ export default function Home() {
         body: JSON.stringify({ address: target }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Analysis failed");
+      if (!res.ok) throw new Error(json.error ?? "Penciling failed");
       const resp = json as AnalyzeResponse;
-      // Auto-fill from real property data: listing (Mashvisor) wins, then
-      // ATTOM's records — the user can still edit either field. Skipped
-      // when replaying a saved search, whose inputs are the point.
       const listing = resp.mashvisor?.listing;
       const bedsAuto = listing?.beds ?? resp.attom?.beds;
       const priceAuto = listing?.listPrice;
@@ -440,12 +452,9 @@ export default function Home() {
             : null,
         ].filter(Boolean);
         setAutoFilled(
-          filled.length
-            ? `${filled.join(" & ")} auto-filled — edit freely`
-            : null
+          filled.length ? `${filled.join(" & ")} auto-filled — edit freely` : null
         );
       }
-      // record in the address history (dedupe, most recent first)
       const matched = resp.property.matchedAddress;
       setHistory((prev) =>
         [
@@ -455,16 +464,15 @@ export default function Home() {
             price: finalPrice,
             bedrooms: finalBeds,
           },
-          ...prev.filter(
-            (h) => h.address.toLowerCase() !== matched.toLowerCase()
-          ),
+          ...prev.filter((h) => h.address.toLowerCase() !== matched.toLowerCase()),
         ].slice(0, HISTORY_MAX)
       );
       setData(resp);
-      setLoadStep(6);
+      setStrategy("auto");
+      setLoadStep(8);
       setPhase("results");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis failed");
+      setError(err instanceof Error ? err.message : "Penciling failed");
       setPhase(data ? "results" : "empty");
     } finally {
       if (stepTimer.current) {
@@ -500,10 +508,7 @@ export default function Home() {
       savedAt: new Date().toISOString(),
     };
     setSearches((prev) =>
-      [entry, ...prev.filter((s) => s.address !== entry.address)].slice(
-        0,
-        SEARCHES_MAX
-      )
+      [entry, ...prev.filter((s) => s.address !== entry.address)].slice(0, SEARCHES_MAX)
     );
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 2000);
@@ -517,33 +522,94 @@ export default function Home() {
     analyze(s.address, { keepInputs: true });
   }
 
-  const scenarios = useMemo(() => {
-    if (!data || price === "" || bedrooms === "") return null;
-    const a: Assumptions = {
-      ...adv,
-      price: Number(price),
-      bedrooms: Number(bedrooms),
-    };
-    return computeScenariosFromData(data, a);
-  }, [data, price, bedrooms, adv]);
-
   const assumptionsFull = useMemo<Assumptions | null>(() => {
     if (price === "" || bedrooms === "") return null;
     return { ...adv, price: Number(price), bedrooms: Number(bedrooms) };
   }, [adv, price, bedrooms]);
+
+  const scenarios = useMemo(() => {
+    if (!data || !assumptionsFull) return null;
+    return computeScenariosFromData(data, assumptionsFull);
+  }, [data, assumptionsFull]);
 
   const ranked = useMemo<RankedScenario[]>(
     () => (scenarios ? rankScenarios(scenarios) : []),
     [scenarios]
   );
 
+  const activeKey: ScenarioKey3 | null = useMemo(() => {
+    if (ranked.length === 0) return null;
+    if (strategy !== "auto" && ranked.some((r) => r.key === strategy)) return strategy;
+    return ranked[0].key;
+  }, [ranked, strategy]);
+
+  const active = useMemo(
+    () => ranked.find((r) => r.key === activeKey) ?? null,
+    [ranked, activeKey]
+  );
+
+  // Investor value: one bisection per render, threaded everywhere — the
+  // investor-value card, max buy price, walk-away gap, recommendation AND
+  // the score's price-vs-value part all read this single number.
+  const iv = useMemo(() => {
+    if (!data || !assumptionsFull || !active) return 0;
+    return solveInvestorValue(data, assumptionsFull, active.key, targetCoc);
+  }, [data, assumptionsFull, active, targetCoc]);
+
+  const scoreInputs = useMemo(
+    () =>
+      assumptionsFull
+        ? {
+            units: Math.max(1, assumptionsFull.units),
+            targetCoc,
+            price: assumptionsFull.price,
+            investorValue: iv,
+          }
+        : null,
+    [assumptionsFull, targetCoc, iv]
+  );
+
+  const parts = useMemo(
+    () => (active && scoreInputs ? scoreParts(active.s, scoreInputs) : []),
+    [active, scoreInputs]
+  );
+  const score = useMemo(
+    () => (active && scoreInputs ? pencilScore(active.s, scoreInputs) : 0),
+    [active, scoreInputs]
+  );
+  const tier = tierForScore(score);
+
+  const confidence = useMemo(
+    () => (data && scenarios && assumptionsFull ? buildConfidence(data, scenarios, assumptionsFull) : null),
+    [data, scenarios, assumptionsFull]
+  );
+
   const verdict = useMemo(() => {
-    if (!scenarios || !assumptionsFull || ranked.length === 0) return null;
-    return buildVerdict(scenarios, assumptionsFull, {
-      occupancyPct: data?.mashvisor?.str?.occupancyPct,
-      revenue: scenarios.str?.monthlyRent,
+    if (!active || !assumptionsFull) return null;
+    return buildPencilVerdict({
+      score,
+      price: assumptionsFull.price,
+      investorValue: iv,
+      active,
+      count: ranked.length,
+      cashIn: active.s.cashInvested,
+      targetCoc,
     });
-  }, [scenarios, assumptionsFull, ranked, data]);
+  }, [active, assumptionsFull, score, iv, ranked.length, targetCoc]);
+
+  const wr = useMemo(() => {
+    if (!data || !scenarios || !active || !assumptionsFull) return { why: [], risks: [] };
+    return whyAndRisks({
+      data,
+      set: scenarios,
+      active,
+      a: assumptionsFull,
+      investorValue: iv,
+      parts,
+      targetCoc,
+      rentRange: confidence?.rentRange ?? null,
+    });
+  }, [data, scenarios, active, assumptionsFull, iv, parts, targetCoc, confidence]);
 
   const outlook = useMemo(() => {
     if (!data || !scenarios || !assumptionsFull) return null;
@@ -557,42 +623,51 @@ export default function Home() {
 
   const offers = useMemo(() => {
     if (!data || !assumptionsFull || ranked.length === 0) return null;
-    return solveOfferPrices(
-      data,
-      assumptionsFull,
-      ranked.map((r) => r.key)
-    );
+    return solveOfferPrices(data, assumptionsFull, ranked.map((r) => r.key));
   }, [data, assumptionsFull, ranked]);
 
   // "312 WALNUT ST, CINCINNATI, OH, 45202" → "Cincinnati" for PHA guidance
   const cityLabel = useMemo(() => {
     const city = data?.property.matchedAddress.split(",")[1]?.trim() ?? "";
-    return city
-      ? city.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-      : null;
+    return city ? city.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : null;
   }, [data]);
 
-  // Auto-save/update the analyzed property as a map pin; assumption tweaks
-  // live-update its snapshot.
+  // Auto-save/update the penciled property as a map pin, with per-strategy
+  // Pencil Scores computed against the current investor value.
   useEffect(() => {
-    if (!data || !scenarios) return;
+    if (!data || !scenarios || !scoreInputs) return;
     if (!scenarios.market && !scenarios.s8 && !scenarios.str) return;
     if (price === "" || bedrooms === "") return;
     const pin = buildPin(data, scenarios, Number(price), Number(bedrooms));
+    const withScore = (m: PinMetrics | undefined, s: ScenarioResult | null) =>
+      m && s ? { ...m, score: pencilScore(s, scoreInputs) } : m;
+    const scored: SavedPin = {
+      ...pin,
+      investorValue: iv > 0 ? iv : undefined,
+      market: withScore(pin.market, scenarios.market),
+      s8: withScore(pin.s8, scenarios.s8),
+      str: withScore(pin.str, scenarios.str),
+    };
     setSavedPins((prev) => {
-      const rest = prev.filter((p) => p.id !== pin.id);
-      return [...rest, pin];
+      const rest = prev.filter((p) => p.id !== scored.id);
+      return [...rest, scored];
     });
-    setFocusId(pin.id);
-  }, [data, scenarios, price, bedrooms]);
+    setFocusId(scored.id);
+  }, [data, scenarios, price, bedrooms, scoreInputs, iv]);
+
+  const pinKey: ScenarioKey = (activeKey ?? "market") as ScenarioKey;
+
+  const pinTier = (m: PinMetrics | undefined): PencilTier | null =>
+    m ? (m.score != null ? tierForScore(m.score) : tierForLegacyRating(m.rating)) : null;
 
   const visiblePins = useMemo(
     () =>
       savedPins.filter((p) => {
-        const m = p[colorBy] ?? p.market ?? p.s8 ?? p.str;
-        return m ? ratingFilter.has(m.rating) : true;
+        const m = p[pinKey] ?? p.market ?? p.s8 ?? p.str;
+        const t = pinTier(m);
+        return t ? tierFilter.has(t.short) : true;
       }),
-    [savedPins, colorBy, ratingFilter]
+    [savedPins, pinKey, tierFilter]
   );
 
   const dealDate = useMemo(
@@ -609,8 +684,7 @@ export default function Home() {
   const beds = data?.mashvisor?.listing?.beds ?? data?.attom?.beds ?? bedrooms;
   const baths = data?.mashvisor?.listing?.baths ?? data?.attom?.baths;
   const sqft = data?.mashvisor?.listing?.sqft ?? data?.attom?.sqft;
-  const yearBuilt =
-    data?.mashvisor?.listing?.yearBuilt ?? data?.attom?.yearBuilt;
+  const yearBuilt = data?.mashvisor?.listing?.yearBuilt ?? data?.attom?.yearBuilt;
 
   const subhead = data
     ? [
@@ -620,8 +694,7 @@ export default function Home() {
           : null,
         sqft != null ? `${sqft.toLocaleString()} sqft` : null,
         yearBuilt != null ? `built ${yearBuilt}` : null,
-        price !== "" ? `asking ${usd(Number(price))}` : null,
-        cashIn != null ? `${usd(cashIn)} cash in` : null,
+        cashIn != null ? `${usdWhole(cashIn)} cash in` : null,
       ]
         .filter(Boolean)
         .join(" · ")
@@ -629,25 +702,42 @@ export default function Home() {
 
   const divergePct =
     data?.attom?.rentalAvm != null && scenarios?.fmrRent != null
-      ? (Math.abs(data.attom.rentalAvm - scenarios.fmrRent) /
-          scenarios.fmrRent) *
-        100
+      ? (Math.abs(data.attom.rentalAvm - scenarios.fmrRent) / scenarios.fmrRent) * 100
       : null;
 
   const hudMissing = Boolean(data && !data.fmr);
   const mvMissing = Boolean(data && !data.mashvisor?.str);
 
+  const strategyTabs = (
+    <div className="flex gap-3">
+      {ranked.map((r) => (
+        <button
+          key={r.key}
+          onClick={() => setStrategy(r.key)}
+          className={`cursor-pointer pb-[2px] text-[12px] font-semibold ${
+            activeKey === r.key
+              ? "border-b-2 border-pencil text-ink"
+              : "border-b-2 border-transparent text-label"
+          }`}
+        >
+          {TAB_LABEL[r.key]}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <div className="grid min-h-screen grid-cols-[300px_minmax(0,1fr)] items-start max-lg:block">
+    <div className="grid min-h-screen grid-cols-[304px_minmax(0,1fr)] items-start max-lg:block">
       {/* mobile top bar — the sidebar becomes a toggled drawer under lg */}
-      <div className="sticky top-0 z-30 flex items-center justify-between border-b border-rule bg-sidebar px-4 py-3 lg:hidden">
-        <span className="font-serif text-[17px] font-medium">
-          Rental Cash Flow Analyzer
+      <div className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-sidebar px-4 py-3 lg:hidden">
+        <span className="flex items-center gap-2">
+          <AppMark size={24} />
+          <span className="text-[15px] font-extrabold tracking-[-.032em]">PropPencil</span>
         </span>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setSidebarOpen((o) => !o)}
-            className="cursor-pointer rounded-[2px] border border-input-border bg-field px-3 py-[6px] text-[12px] font-semibold text-ink"
+            className="cursor-pointer rounded-[7px] border border-input-border bg-card px-3 py-[6px] text-[12px] font-semibold text-ink"
           >
             {sidebarOpen ? "Close" : "Inputs"}
           </button>
@@ -656,152 +746,126 @@ export default function Home() {
       </div>
       <div className={`${sidebarOpen ? "block" : "hidden"} lg:block`}>
         <AssumptionsSidebar
-        address={address}
-        onAddress={setAddress}
-        price={price}
-        onPrice={setPrice}
-        bedrooms={bedrooms}
-        onBedrooms={setBedrooms}
-        adv={adv}
-        setA={setA}
-        onReset={() =>
-          setAdv((p) => ({
-            ...DEFAULT_ASSUMPTIONS,
-            interestRatePct: liveRate?.pct ?? DEFAULT_ASSUMPTIONS.interestRatePct,
-          }))
-        }
-        onAnalyze={() => analyze()}
-        analyzing={phase === "loading"}
-        sources={sources}
-        liveRate={liveRate}
-        user={user}
-        persistent={persistent}
-        onSignOut={signOut}
-        batchAssumptions={adv}
-        batchDefaultPrice={price === "" ? 100000 : Number(price)}
-        batchDefaultBedrooms={bedrooms === "" ? 3 : Number(bedrooms)}
-        onPin={(pin) =>
-          setSavedPins((prev) => [...prev.filter((p) => p.id !== pin.id), pin])
-        }
-        history={history}
-        searches={searches}
-        onLoadSearch={loadSearch}
-        onDeleteSearch={(id) =>
-          setSearches((prev) => prev.filter((s) => s.id !== id))
-        }
+          address={address}
+          onAddress={setAddress}
+          price={price}
+          onPrice={setPrice}
+          bedrooms={bedrooms}
+          onBedrooms={setBedrooms}
+          adv={adv}
+          setA={setA}
+          onReset={() =>
+            setAdv(() => ({
+              ...DEFAULT_ASSUMPTIONS,
+              interestRatePct: liveRate?.pct ?? DEFAULT_ASSUMPTIONS.interestRatePct,
+            }))
+          }
+          onAnalyze={() => analyze()}
+          analyzing={phase === "loading"}
+          sources={sources}
+          liveRate={liveRate}
+          batchAssumptions={adv}
+          batchDefaultPrice={price === "" ? 100000 : Number(price)}
+          batchDefaultBedrooms={bedrooms === "" ? 3 : Number(bedrooms)}
+          onPin={(pin) =>
+            setSavedPins((prev) => [...prev.filter((p) => p.id !== pin.id), pin])
+          }
+          history={history}
+          searches={searches}
+          onLoadSearch={loadSearch}
+          onDeleteSearch={(id) =>
+            setSearches((prev) => prev.filter((s) => s.id !== id))
+          }
         />
       </div>
 
-      <main className="flex max-w-[1120px] flex-col gap-9 px-12 pb-[70px] pt-10 max-md:px-5">
-        {/* desktop account menu — the mobile top bar carries its own */}
-        <div className="-mb-7 flex justify-end max-lg:hidden">
+      <main className="flex max-w-[1180px] flex-col gap-[34px] px-10 pb-[70px] pt-[34px] max-md:px-5">
+        <div className="-mb-6 flex justify-end max-lg:hidden">
           <AccountMenu user={user} persistent={persistent} onSignOut={signOut} />
         </div>
+
         {error && (
-          <div className="border-l-[3px] border-negative bg-accent-tint py-[14px] pl-4">
-            <span className="text-[13px] font-semibold text-warn-ink">
-              {error}
-            </span>
+          <div className="rounded-[8px] border border-[#f0dba8] border-l-4 border-l-negative bg-accent-tint px-4 py-[14px]">
+            <span className="text-[13px] font-bold text-warn-ink">{error}</span>
           </div>
         )}
 
         {phase === "empty" && (
           <section className="flex flex-col gap-[34px]">
-            <div className="flex flex-col gap-[14px] border-b-2 border-ink pb-[22px]">
-              <Eyebrow>Start here</Eyebrow>
-              <h2 className="max-w-[26ch] font-serif text-[40px] max-md:text-[30px] font-medium leading-[1.12] tracking-[-.02em] [text-wrap:pretty]">
-                Underwrite one house three ways, then decide.
-              </h2>
-              <p className="max-w-[62ch] font-serif text-[17px] leading-[1.6] text-prose [text-wrap:pretty]">
-                Enter an address and a price. The analyzer pulls the county, the
-                HUD Fair Market Rent, the FEMA flood zone and the tax rate, then
-                reports monthly cash flow after debt service for market rent,
-                Section 8 and short-term rental — plus which of the three you
-                should actually run.
+            <div className="flex flex-col gap-4 border-b border-border pb-[26px]">
+              <h1 className="text-[56px] font-extrabold leading-none tracking-[-.04em] max-md:text-[38px]">
+                Does it pencil?
+              </h1>
+              <span className="block h-[5px] w-[132px] rounded-[3px] bg-pencil" />
+              <p className="max-w-[60ch] text-[17px] leading-[1.6] text-body [text-wrap:pretty]">
+                PropPencil turns any property into an investor-ready deal
+                analysis. Enter an address and see estimated value, rent, cash
+                flow, expenses, returns and risk — then decide whether the deal
+                actually works.
               </p>
               <div className="mt-1 flex flex-wrap items-center gap-3">
                 <button
                   onClick={useSample}
-                  className="cursor-pointer rounded-[2px] bg-accent px-5 py-[11px] text-[13px] font-semibold text-field hover:bg-accent-hover"
+                  className="cursor-pointer rounded-[8px] bg-ink px-[22px] py-[13px] text-[14px] font-bold text-on-dark hover:bg-[#333]"
                 >
-                  Try the sample deal
+                  Pencil an example property
                 </button>
-                <span className="text-[13px] text-body">
+                <span className="text-[13px] text-label">
                   1418 Vine St, Cincinnati — $118,000, 3 bed
                 </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-x-11 gap-y-[34px]">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(290px,1fr))] gap-x-10 gap-y-7">
               <div className="flex flex-col">
-                <h3 className="mb-1 border-b-2 border-ink pb-2 font-serif text-[21px] font-medium">
-                  What you get back
-                </h3>
+                <h2 className="mb-[6px] border-b border-ink pb-[9px] text-[19px] font-bold tracking-[-.02em]">
+                  Every screen answers one question
+                </h2>
                 {[
-                  [
-                    "A recommendation, not a dashboard",
-                    "Which of the three strategies wins, by how much, and what it costs you in certainty.",
-                  ],
-                  [
-                    "Monthly cash flow after the mortgage",
-                    "The headline number, with cash-on-cash, cap rate, GRM and NOI behind it.",
-                  ],
-                  [
-                    "Every line item, side by side",
-                    "Where the rent goes in each scenario, so a surprise is a number you can point at.",
-                  ],
-                  [
-                    "A pin on the deal map",
-                    "Every address you analyze is saved and colored by rating, so the pattern shows up.",
-                  ],
+                  ["What is it worth to you?", "An investor value from the property's own economics, not a Zestimate."],
+                  ["What will it earn and cost?", "Rent, expenses and financing across three tenant strategies."],
+                  ["What could go wrong?", "The specific assumptions that would break the deal, quantified."],
+                  ["What price should you pay?", "A maximum buy price tied to the return you actually require."],
                 ].map(([title, body], i, arr) => (
                   <div
                     key={title}
-                    className={`flex gap-[14px] py-[14px] ${
-                      i < arr.length - 1 ? "border-b border-rule" : ""
-                    }`}
+                    className={`flex gap-[13px] py-[13px] ${i < arr.length - 1 ? "border-b border-rule" : ""}`}
                   >
-                    <span className="w-[22px] font-serif text-[19px] leading-[1.2] text-accent">
-                      {i + 1}
+                    <span className="w-5 shrink-0 text-[15px] font-extrabold text-pencil">
+                      0{i + 1}
                     </span>
-                    <div className="flex flex-col gap-[3px]">
-                      <span className="text-[13.5px] font-medium">{title}</span>
-                      <span className="text-[12.5px] leading-[1.55] text-body">
-                        {body}
-                      </span>
+                    <div className="flex flex-col gap-[2px]">
+                      <span className="text-[13.5px] font-bold">{title}</span>
+                      <span className="text-[12.5px] leading-[1.5] text-label">{body}</span>
                     </div>
                   </div>
                 ))}
               </div>
               <div className="flex flex-col">
-                <h3 className="mb-1 border-b-2 border-ink pb-2 font-serif text-[21px] font-medium">
-                  How deals are rated
-                </h3>
-                {(
-                  [
-                    ["Rare", "≥ $400/mo cash flow · ≥ 12% cash-on-cash · ≥ 8% cap rate"],
-                    ["Fantastic", "≥ $250/mo cash flow · ≥ 10% cash-on-cash"],
-                    ["Great", "≥ $150/mo cash flow · ≥ 8% cash-on-cash"],
-                    ["Good", "> $50/mo cash flow · ≥ 5% cash-on-cash"],
-                    ["Poor", "Anything else, break-even included"],
-                  ] as [Rating, string][]
-                ).map(([rating, req]) => (
+                <h2 className="mb-[6px] border-b border-ink pb-[9px] text-[19px] font-bold tracking-[-.02em]">
+                  The Pencil Score
+                </h2>
+                <p className="my-3 text-[13.5px] leading-[1.6] text-body">
+                  One number from zero to a hundred, weighted across cash flow,
+                  cash-on-cash, cap rate, debt coverage and price against
+                  investor value. Never a black box — every analysis shows what
+                  moved the score and by how much.
+                </p>
+                {PENCIL_TIERS.map((t) => (
                   <div
-                    key={rating}
-                    className="flex items-center justify-between gap-3 border-b border-rule py-[11px]"
+                    key={t.label}
+                    className="flex items-center justify-between gap-3 border-b border-rule py-[9px]"
                   >
-                    <RatingBadge rating={rating} />
-                    <span className="text-right text-[12.5px] text-[#4a423a]">
-                      {req}
+                    <TierBadge tier={t} />
+                    <span className="text-[12.5px] font-semibold text-body tabular-nums">
+                      {t.min === -Infinity
+                        ? "below 50"
+                        : t.min === 90
+                          ? "90 and up"
+                          : `${t.min}–${t.min + 9}`}
                     </span>
                   </div>
                 ))}
-                <p className="mt-[14px] font-serif text-[14px] leading-[1.6] text-[#4a423a]">
-                  Thresholds are per unit. A deal that misses the next tier by
-                  less than $50/mo, 1.5 points of cash-on-cash or 1 point of cap
-                  rate is flagged <i>Almost</i> with the exact shortfall — $13 a
-                  month should not decide a purchase.
-                </p>
               </div>
             </div>
           </section>
@@ -809,148 +873,116 @@ export default function Home() {
 
         {phase === "loading" && (
           <section className="flex flex-col gap-[26px]">
-            <header className="flex flex-col gap-[10px] border-b-2 border-ink pb-[18px]">
-              <Eyebrow>Underwriting</Eyebrow>
-              <h2 className="font-serif text-[32px] max-md:text-[25px] font-medium leading-[1.15] tracking-[-.02em]">
+            <div className="flex flex-col gap-[10px] border-b border-ink pb-[18px]">
+              <Eyebrow>Penciling the deal</Eyebrow>
+              <h2 className="text-[30px] font-extrabold leading-[1.15] tracking-[-.03em] max-md:text-[24px]">
                 {address || SAMPLE.address}
               </h2>
-            </header>
-            <div className="flex max-w-[560px] flex-col">
+            </div>
+            <div className="flex max-w-[580px] flex-col">
               {steps.map((s, i) => {
                 const done = loadStep > i;
-                const active = loadStep === i;
+                const act = loadStep === i;
                 return (
-                  <div
-                    key={s.label}
-                    className="flex items-center gap-3 border-b border-rule py-[11px]"
-                  >
+                  <div key={s.label} className="flex items-center gap-3 border-b border-rule py-[10px]">
                     <span
-                      className={`h-4 w-4 shrink-0 rounded-full border ${
-                        active ? "animate-step-pulse" : ""
-                      }`}
+                      className={`h-4 w-4 shrink-0 rounded-full ${act ? "animate-step-pulse" : ""}`}
                       style={{
-                        borderColor: !s.on
-                          ? "#d9cfbe"
-                          : done
-                            ? "#2f6b4f"
-                            : active
-                              ? "#96552a"
-                              : "#d9cfbe",
-                        background: !s.on
-                          ? "transparent"
-                          : done
-                            ? "#2f6b4f"
-                            : active
-                              ? "#96552a"
-                              : "transparent",
+                        border: `1.5px solid ${!s.on ? "#ddd6c6" : done ? "#0f6b44" : act ? "#171717" : "#ddd6c6"}`,
+                        background: !s.on ? "transparent" : done ? "#0f6b44" : act ? "#f4c542" : "transparent",
                       }}
                     />
                     <span
-                      className="text-[13.5px]"
-                      style={{
-                        color: !s.on ? "#7a7165" : done || active ? "#1d1a16" : "#7a7165",
-                      }}
+                      className="text-[13.5px] font-medium"
+                      style={{ color: !s.on ? "#8a8780" : "#171717" }}
                     >
                       {s.label}
                     </span>
                     <span className="ml-auto text-[12px] text-label">
-                      {!s.on
-                        ? "skipped · no key"
-                        : done
-                          ? `${s.src} ✓`
-                          : active
-                            ? `querying ${s.src}…`
-                            : s.src}
+                      {!s.on ? "skipped · no key" : done ? `${s.src} ✓` : act ? "working…" : s.src}
                     </span>
                   </div>
                 );
               })}
             </div>
-            <div className="flex max-w-[560px] flex-col gap-3">
-              <div className="h-3 w-[70%] rounded-[1px] bg-skeleton" />
-              <div className="h-3 w-[92%] rounded-[1px] bg-skeleton" />
-              <div className="h-3 w-[54%] rounded-[1px] bg-skeleton" />
+            <div className="flex max-w-[580px] flex-col gap-3">
+              <div className="h-[14px] w-[68%] rounded-[4px] bg-skeleton" />
+              <div className="h-[14px] w-[90%] rounded-[4px] bg-skeleton" />
+              <div className="h-[14px] w-[52%] rounded-[4px] bg-skeleton" />
             </div>
           </section>
         )}
 
-        {phase === "results" && data && (
-          <section className="flex flex-col gap-9">
-            <header className="flex flex-col gap-3 border-b-2 border-ink pb-[18px]">
-              <div className="flex flex-wrap items-baseline justify-between gap-3">
-                <Eyebrow>Deal brief · {dealDate}</Eyebrow>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={saveSearch}
-                    className={`cursor-pointer rounded-[2px] px-3 py-[6px] text-[12px] font-semibold text-field ${
-                      justSaved
-                        ? "bg-positive"
-                        : "bg-accent hover:bg-accent-hover"
-                    }`}
-                  >
-                    {justSaved ? "Saved ✓" : "Save search"}
-                  </button>
-                  <button onClick={() => window.print()} className={ACTION_BTN}>
-                    Export PDF
-                  </button>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard?.writeText(window.location.href).catch(() => {});
-                    }}
-                    className={ACTION_BTN}
-                    title="Copies the app link — your partner signs in and loads the same saved search"
-                  >
-                    Share with partner
-                  </button>
-                  <button
-                    onClick={startOver}
-                    className={ACTION_BTN}
-                    title="Clear this analysis and return to the start screen (saved pins and searches are kept)"
-                  >
-                    Start over
-                  </button>
-                </div>
+        {phase === "results" && data && assumptionsFull && (
+          <section className="flex flex-col gap-[34px]">
+            <header className="flex flex-wrap items-end justify-between gap-4 border-b border-ink pb-4">
+              <div className="flex flex-col gap-[6px]">
+                <Eyebrow>Penciled {dealDate}</Eyebrow>
+                <h2 className="text-[32px] font-extrabold leading-[1.1] tracking-[-.032em] max-md:text-[24px]">
+                  {data.property.matchedAddress}
+                </h2>
+                <span className="text-[13px] text-label">{subhead}</span>
+                {autoFilled && (
+                  <span className="text-[12px] font-medium text-positive">✓ {autoFilled}</span>
+                )}
               </div>
-              <h2 className="font-serif text-[38px] max-md:text-[27px] font-medium leading-[1.1] tracking-[-.02em]">
-                {data.property.matchedAddress}
-              </h2>
-              <div className="text-[13px] text-body">{subhead}</div>
-              {autoFilled && (
-                <div className="text-[12px] text-positive">✓ {autoFilled}</div>
-              )}
+              <div className="flex flex-wrap gap-[9px]">
+                <button
+                  onClick={saveSearch}
+                  className={justSaved ? `${OUTLINE_BTN} border-positive text-positive` : OUTLINE_BTN}
+                >
+                  {justSaved ? "Saved ✓" : "Save to My Pencils"}
+                </button>
+                <button onClick={() => window.print()} className={OUTLINE_BTN}>
+                  Export
+                </button>
+                <button
+                  onClick={() => {
+                    navigator.clipboard?.writeText(window.location.href).catch(() => {});
+                  }}
+                  className={OUTLINE_BTN}
+                  title="Copies the app link — your partner signs in and loads the same pencil"
+                >
+                  Share with partner
+                </button>
+                <button
+                  onClick={startOver}
+                  className={OUTLINE_BTN}
+                  title="Clear this analysis and return to the start screen (My Pencils and the map are kept)"
+                >
+                  Start over
+                </button>
+              </div>
             </header>
 
             {hudMissing && (
-              <div className="border-l-[3px] border-warn bg-accent-tint py-[14px] pl-4">
-                <div className="flex flex-col gap-[5px]">
-                  <span className="text-[13px] font-semibold text-warn-ink">
-                    No HUD data — the Section 8 scenario is unavailable.
+              <div className="flex gap-[13px] rounded-[8px] border border-[#f0dba8] border-l-4 border-l-warn bg-accent-tint px-4 py-[14px]">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[13px] font-bold text-warn-ink">
+                    No HUD data — the Section 8 strategy can&apos;t be penciled.
                   </span>
-                  <p className="m-0 max-w-[76ch] font-serif text-[14px] leading-[1.6] text-warn-ink">
+                  <p className="m-0 max-w-[78ch] text-[13px] leading-[1.6] text-warn-ink">
                     {data.attom?.rentalAvm != null
-                      ? "Section 8 rent is FMR × payment standard, so that scenario stays dark until a free token from huduser.gov is in place. Market rent is unaffected — it falls back to ATTOM's rental AVM, which is property-specific rather than a county-wide 40th percentile."
-                      : "Section 8 rent is FMR × payment standard, and with no ATTOM key either there is no market-rent baseline to fall back on. Register a free HUD token at huduser.gov, or enter a real comp in Market rent override to underwrite the market case by hand."}
-                    {data.fmrError && (
-                      <span className="text-[12px]"> ({data.fmrError})</span>
-                    )}
+                      ? "Section 8 rent is the Fair Market Rent times your payment standard, so that strategy stays dark until a free token from huduser.gov is in place. The traditional rental is unaffected — it falls back to ATTOM's rent estimate."
+                      : "Section 8 needs HUD, and with no ATTOM key either there is no rent baseline at all. Register a free token at huduser.gov, or enter a comp under Market rent override."}
+                    {data.fmrError && <span className="text-[12px]"> ({data.fmrError})</span>}
                   </p>
                 </div>
               </div>
             )}
 
             {mvMissing && (
-              <div className="border-l-[3px] border-label bg-sidebar py-[14px] pl-4">
-                <div className="flex flex-col gap-[5px]">
-                  <span className="text-[13px] font-semibold text-[#4a423a]">
+              <div className="flex gap-[13px] rounded-[8px] border border-[#e0dacd] border-l-4 border-l-label bg-[#f4f2ec] px-4 py-[14px]">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[13px] font-bold text-body">
                     {data.mashvisorError
-                      ? "Mashvisor unavailable — the short-term rental scenario is skipped."
-                      : "No Mashvisor key — the short-term rental scenario is skipped."}
+                      ? "Mashvisor unavailable — the short-term strategy is skipped."
+                      : "No Mashvisor key — the short-term strategy is skipped."}
                   </span>
-                  <p className="m-0 max-w-[76ch] font-serif text-[14px] leading-[1.6] text-[#4a423a]">
-                    Occupancy and nightly rate come from Mashvisor; without them
-                    there is no honest STR number to show. The two long-term
-                    scenarios below are unaffected, and the fidelity check falls
-                    back to ATTOM alone.
+                  <p className="m-0 max-w-[78ch] text-[13px] leading-[1.6] text-body">
+                    Occupancy and nightly rate come from Mashvisor, so there is
+                    no honest short-term number to pencil. The long-term
+                    strategies below are unaffected.
                     {data.mashvisorError && (
                       <span className="text-[12px]"> ({data.mashvisorError})</span>
                     )}
@@ -960,102 +992,264 @@ export default function Home() {
             )}
 
             {data.attomError && (
-              <div className="border-l-[3px] border-label bg-sidebar py-[14px] pl-4">
-                <div className="flex flex-col gap-[5px]">
-                  <span className="text-[13px] font-semibold text-[#4a423a]">
+              <div className="flex gap-[13px] rounded-[8px] border border-[#e0dacd] border-l-4 border-l-label bg-[#f4f2ec] px-4 py-[14px]">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[13px] font-bold text-body">
                     ATTOM unavailable — property record, tax bill and rent
                     estimate fall back to free sources.
                   </span>
-                  <p className="m-0 max-w-[76ch] font-serif text-[14px] leading-[1.6] text-[#4a423a]">
-                    The tax line uses the county median instead of this parcel&apos;s
-                    actual bill, and the market rent leans on HUD and Census
-                    data. <span className="text-[12px]">({data.attomError})</span>
+                  <p className="m-0 max-w-[78ch] text-[13px] leading-[1.6] text-body">
+                    The tax line uses the county median instead of this
+                    parcel&apos;s actual bill, and the market rent leans on HUD
+                    and Census data.{" "}
+                    <span className="text-[12px]">({data.attomError})</span>
                   </p>
                 </div>
               </div>
             )}
 
-            {verdict && ranked.length > 0 && (
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] items-start gap-x-11 gap-y-[30px]">
+            {active && verdict && (
+              <section className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] items-start gap-x-11 gap-y-[30px]">
                 <div className="flex flex-col gap-[14px]">
-                  <Eyebrow>The call</Eyebrow>
-                  <h3 className="font-serif text-[31px] max-md:text-[25px] font-medium leading-[1.22] tracking-[-.015em] [text-wrap:pretty]">
-                    {verdict.headline}
-                  </h3>
-                  <p className="max-w-[60ch] font-serif text-[16.5px] leading-[1.62] text-prose [text-wrap:pretty]">
-                    {verdict.p1}
-                  </p>
-                  <p className="max-w-[60ch] font-serif text-[16.5px] leading-[1.62] text-prose [text-wrap:pretty]">
-                    {verdict.p2}
-                  </p>
-                </div>
-
-                <div className="flex flex-col border-t-2 border-ink">
-                  {ranked.map((r, i) => {
-                    const maxAbs = Math.max(
-                      1,
-                      ...ranked.map((x) => Math.abs(x.s.monthlyCashFlow))
-                    );
-                    const width = Math.max(
-                      3,
-                      (Math.abs(r.s.monthlyCashFlow) / maxAbs) * 100
-                    );
-                    return (
-                      <div
-                        key={r.key}
-                        className="flex flex-col gap-[6px] border-b border-rule py-[14px]"
-                      >
-                        <div className="flex items-baseline justify-between gap-[10px]">
-                          <span className="text-[10.5px] font-semibold uppercase tracking-[.12em] text-label">
-                            {ladderEyebrow(ranked, i)}
-                          </span>
-                          <RatingBadge rating={r.s.rating} small />
-                        </div>
-                        <span
-                          className={`font-serif text-[38px] max-md:text-[30px] font-medium leading-none tracking-[-.02em] ${cfClass(r.s.monthlyCashFlow)}`}
-                        >
-                          {signedUsd(r.s.monthlyCashFlow)}/mo
+                  <Eyebrow>Pencil Score</Eyebrow>
+                  <div className="flex flex-wrap items-end gap-[18px]">
+                    <div className="flex flex-col gap-[6px]">
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-[84px] font-extrabold leading-[.86] tracking-[-.05em] text-ink tabular-nums max-md:text-[64px]">
+                          {score}
                         </span>
-                        <div className="h-[6px] overflow-hidden rounded-[1px] bg-bar-track">
+                        <span className="text-[22px] font-semibold text-label">/100</span>
+                      </div>
+                      <span
+                        className="block h-[5px] rounded-[3px] bg-pencil"
+                        style={{ width: `${Math.max(8, score)}%` }}
+                      />
+                    </div>
+                    <span
+                      className="flex-none whitespace-nowrap rounded-[7px] px-[14px] py-[7px] text-[14px] font-extrabold tracking-[-.01em]"
+                      style={{ backgroundColor: tier.bg, color: tier.fg, minWidth: "fit-content" }}
+                    >
+                      {tier.label}
+                    </span>
+                  </div>
+                  <p className="m-0 max-w-[46ch] text-[17px] font-semibold leading-[1.55] text-ink [text-wrap:pretty]">
+                    {verdict.line}
+                  </p>
+                  <p className="m-0 max-w-[58ch] text-[13.5px] leading-[1.6] text-body [text-wrap:pretty]">
+                    {verdict.detail}
+                  </p>
+                  <div className="flex flex-col gap-[7px] border-t border-rule pt-[13px]">
+                    <span className="text-[10.5px] font-bold uppercase tracking-[.1em] text-label">
+                      What moved the score
+                    </span>
+                    {parts.map((p) => (
+                      <div key={p.key} className="flex items-center gap-[11px]">
+                        <span className="w-[132px] shrink-0 text-[12px] text-body">{p.label}</span>
+                        <span className="h-[7px] min-w-[40px] flex-1 overflow-hidden rounded-[4px] bg-bar-track">
                           <span
                             className="block h-full"
                             style={{
-                              width: `${width.toFixed(1)}%`,
-                              background: RATING_COLORS[r.s.rating],
+                              width: `${Math.max(2, p.frac * 100).toFixed(0)}%`,
+                              background: p.frac >= 0.66 ? "#0f6b44" : p.frac >= 0.33 ? "#8a6410" : "#a8281e",
                             }}
                           />
-                        </div>
-                        <span className="text-[12.5px] text-body">
-                          {pct1(r.s.cashOnCashPct)} cash-on-cash return ·{" "}
-                          {pct1(r.s.capRatePct)} cap rate
-                          {r.s.ratingDetail.almost
-                            ? ` · almost ${r.s.ratingDetail.almost}`
-                            : ""}
+                        </span>
+                        <span className="w-[78px] shrink-0 text-right text-[11.5px] font-semibold text-body tabular-nums">
+                          {p.value}
+                        </span>
+                        <span className="w-[52px] shrink-0 text-right text-[11px] text-label tabular-nums">
+                          {(p.frac * p.weight).toFixed(0)}/{p.weight}
                         </span>
                       </div>
-                    );
-                  })}
-                  <div className="flex justify-between gap-3 py-[14px]">
-                    <span className="text-[12.5px] text-body">
-                      Spread, best to worst
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-px overflow-hidden rounded-[10px] border border-border bg-border">
+                  <div className="flex flex-col gap-[3px] bg-card px-[18px] py-4">
+                    <span className="text-[10.5px] font-bold uppercase tracking-[.1em] text-label">
+                      Investor value
                     </span>
-                    <span className="text-[13px] font-semibold">
-                      {ranked.length > 1
-                        ? `${usdWhole(
-                            ranked[0].s.monthlyCashFlow -
-                              ranked[ranked.length - 1].s.monthlyCashFlow
-                          )}/mo`
-                        : "—"}
+                    <span className="text-[28px] font-extrabold tracking-[-.03em] tabular-nums">
+                      {iv > 0 ? usdWhole(iv) : "—"}
+                    </span>
+                    <span className="text-[12px] text-label">
+                      What the income supports at {targetCoc}% ·{" "}
+                      {DISPLAY_LABEL[active.key].toLowerCase()}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-[3px] bg-card px-[18px] py-4">
+                    <span className="text-[10.5px] font-bold uppercase tracking-[.1em] text-label">
+                      Asking price
+                    </span>
+                    <span className="text-[28px] font-extrabold tracking-[-.03em] tabular-nums">
+                      {usdWhole(assumptionsFull.price)}
+                    </span>
+                    <span
+                      className="text-[12px] font-semibold"
+                      style={{ color: verdict.gap > 0 ? "#a8281e" : "#0f6b44" }}
+                    >
+                      {verdict.gap > 0
+                        ? `${usdWhole(verdict.gap)} above your investor value`
+                        : `${usdWhole(-verdict.gap)} below your investor value`}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-[3px] bg-card px-[18px] py-4">
+                    <span className="text-[10.5px] font-bold uppercase tracking-[.1em] text-label">
+                      Monthly cash flow
+                    </span>
+                    <span
+                      className={`text-[28px] font-extrabold tracking-[-.03em] tabular-nums ${cfClass(active.s.monthlyCashFlow)}`}
+                    >
+                      {signedUsd(active.s.monthlyCashFlow)}/mo
+                    </span>
+                    <span className="text-[12px] text-label">
+                      Penciling {DISPLAY_LABEL[active.key].toLowerCase()}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 bg-card px-[18px] py-4">
+                    <div className="flex flex-col gap-[2px]">
+                      <span className="flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-[.08em] text-label">
+                        Cash-on-cash
+                        <InfoTip text="A year of cash flow divided by the cash you actually put in — down payment, closing costs and rehab." />
+                      </span>
+                      <span className="text-[17px] font-bold tabular-nums">
+                        {pct1(active.s.cashOnCashPct)}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-[2px]">
+                      <span className="flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-[.08em] text-label">
+                        Cap rate
+                        <InfoTip text="Capitalization rate: a year of income after operating expenses, divided by the purchase price. Ignores the mortgage, so it compares houses rather than loans." />
+                      </span>
+                      <span className="text-[17px] font-bold tabular-nums">
+                        {pct1(active.s.capRatePct)}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-[2px]">
+                      <span className="flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-[.08em] text-label">
+                        Debt coverage
+                        <InfoTip text="DSCR: yearly income after operating expenses divided by the yearly mortgage payment. Above 1.25 is what most lenders want to see." />
+                      </span>
+                      <span className="text-[17px] font-bold tabular-nums">
+                        {Number.isFinite(dscrOf(active.s)) ? dscrOf(active.s).toFixed(2) + "x" : "—"}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-[2px]">
+                      <span className="flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-[.08em] text-label">
+                        Data confidence
+                        <InfoTip text="How much of the analysis rests on directly sourced data rather than inferred estimates." />
+                      </span>
+                      <span className="text-[17px] font-bold tabular-nums">
+                        {confidence ? `${confidence.pct}%` : "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {(wr.why.length > 0 || wr.risks.length > 0) && (
+              <section className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-x-10 gap-y-[26px]">
+                <div className="flex flex-col">
+                  <h3 className="mb-1 border-b border-ink pb-[9px] text-[19px] font-bold tracking-[-.02em]">
+                    Why it pencils
+                  </h3>
+                  {wr.why.map((w) => (
+                    <div key={w.title} className="flex gap-[11px] border-b border-rule py-3">
+                      <span className="shrink-0 text-[14px] font-extrabold leading-[1.35] text-positive">✓</span>
+                      <div className="flex flex-col gap-[2px]">
+                        <span className="text-[13.5px] font-semibold">{w.title}</span>
+                        <span className="text-[12.5px] leading-[1.55] text-label">{w.detail}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {wr.why.length === 0 && (
+                    <p className="py-3 text-[13px] text-label">
+                      Nothing clears its bar at this price — see the risks and
+                      the price panel below.
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-col">
+                  <h3 className="mb-1 border-b border-ink pb-[9px] text-[19px] font-bold tracking-[-.02em]">
+                    What could break the pencil
+                  </h3>
+                  {wr.risks.map((r) => (
+                    <div key={r.title} className="flex gap-[11px] border-b border-rule py-3">
+                      <span className="shrink-0 text-[13px] font-extrabold leading-[1.45] text-warn">⚠</span>
+                      <div className="flex flex-col gap-[2px]">
+                        <span className="text-[13.5px] font-semibold">{r.title}</span>
+                        <span className="text-[12.5px] leading-[1.55] text-label">{r.detail}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {active && verdict && (
+              <section className="flex flex-col gap-4 rounded-[12px] bg-ink-panel px-7 py-[26px] max-md:px-5">
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <h3 className="text-[22px] font-extrabold tracking-[-.028em] text-on-dark">
+                    What should you pay?
+                  </h3>
+                  <span className="text-[12.5px] text-on-dark-dim">
+                    At a required {targetCoc}% cash-on-cash, penciling the{" "}
+                    {DISPLAY_LABEL[active.key].toLowerCase()} strategy
+                  </span>
+                </div>
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-[22px]">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10.5px] font-bold uppercase tracking-[.1em] text-on-dark-dim">
+                      Asking price
+                    </span>
+                    <span className="text-[30px] font-extrabold tracking-[-.03em] text-on-dark tabular-nums">
+                      {usdWhole(assumptionsFull.price)}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10.5px] font-bold uppercase tracking-[.1em] text-pencil">
+                      Maximum buy price
+                    </span>
+                    <span className="text-[30px] font-extrabold tracking-[-.03em] text-pencil tabular-nums">
+                      {iv > 0 ? usdWhole(iv) : "—"}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10.5px] font-bold uppercase tracking-[.1em] text-on-dark-dim">
+                      {verdict.gap > 0 ? "Above target" : "Room below target"}
+                    </span>
+                    <span
+                      className="text-[30px] font-extrabold tracking-[-.03em] tabular-nums"
+                      style={{ color: verdict.gap > 0 ? "#ff9d8f" : "#7ddba8" }}
+                    >
+                      {usdWhole(Math.abs(verdict.gap))}
                     </span>
                   </div>
                 </div>
-              </div>
+                <div className="flex flex-col gap-[9px] border-t border-[#3a3a37] pt-4">
+                  <span className="text-[15px] font-bold text-on-dark">
+                    {verdict.recommendation}
+                  </span>
+                  <p className="m-0 max-w-[82ch] text-[13px] leading-[1.6] text-on-dark-dim">
+                    {verdict.recommendationDetail}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-[10px] border-t border-[#3a3a37] pt-4">
+                  <span className="text-[12.5px] text-on-dark-dim">
+                    Change the return you require in{" "}
+                    <b className="font-bold text-on-dark">Sharpen the Pencil</b>{" "}
+                    and this price moves with it.
+                  </span>
+                </div>
+              </section>
             )}
 
             <section className="flex flex-col gap-2 border-y border-rule py-3">
-              <span className="flex items-center text-[10.5px] font-semibold uppercase tracking-[.12em] text-label">
+              <span className="flex items-center text-[10.5px] font-bold uppercase tracking-[.12em] text-label">
                 Quick adjustments — every number recomputes instantly
-                <InfoTip text="Change a value here or in the left panel and the whole brief — scenarios, verdict, offer prices, stress test — recalculates immediately, no re-query. The full set of assumptions (closing costs, rehab, expense floors, appreciation and more) is in the sidebar under Assumptions." />
+                <InfoTip text="Change a value here or in Sharpen the Pencil and the whole brief — score, verdict, investor value, offer prices, stress test — recalculates immediately, no re-query. The full set of assumptions (closing costs, rehab, CapEx, floors, appreciation and more) is in the sidebar." />
               </span>
               <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
                 {(
@@ -1065,6 +1259,7 @@ export default function Home() {
                     ["Closing costs", "closingCostPct", "%", 0.5],
                     ["Management", "managementPct", "% (0 = self-manage)", 1],
                     ["Payment standard", "paymentStandardPct", "% of FMR", 5],
+                    ["Required return", "targetCocPct", "% cash-on-cash", 0.5],
                   ] as const
                 ).map(([labelText, key, unit, step]) => (
                   <label key={key} className="flex flex-col gap-[3px]">
@@ -1075,12 +1270,9 @@ export default function Home() {
                         step={step}
                         value={adv[key]}
                         onChange={(e) =>
-                          setA(
-                            key,
-                            e.target.value === "" ? 0 : Number(e.target.value)
-                          )
+                          setA(key, e.target.value === "" ? 0 : Number(e.target.value))
                         }
-                        className="w-[64px] rounded-[2px] border border-input-border bg-field px-[6px] py-[4px] text-right text-[12.5px] text-ink outline-none focus:border-accent"
+                        className="w-[64px] rounded-[5px] border border-input-border bg-card px-[6px] py-1 text-right text-[12.5px] font-semibold text-ink outline-none tabular-nums focus:border-ink"
                       />
                       <span className="text-[10.5px] text-label">{unit}</span>
                     </span>
@@ -1100,7 +1292,7 @@ export default function Home() {
                           e.target.value === "" ? null : Number(e.target.value)
                         )
                       }
-                      className="w-[72px] rounded-[2px] border border-input-border bg-field px-[6px] py-[4px] text-right text-[12.5px] text-ink outline-none focus:border-accent"
+                      className="w-[72px] rounded-[5px] border border-input-border bg-card px-[6px] py-1 text-right text-[12.5px] font-semibold text-ink outline-none tabular-nums focus:border-ink"
                     />
                     <span className="text-[10.5px] text-label">$/mo</span>
                   </span>
@@ -1108,32 +1300,12 @@ export default function Home() {
               </div>
             </section>
 
-            {offers && offers.length > 0 && price !== "" && (
+            {offers && offers.length > 0 && (
               <section className="flex flex-col">
                 <SectionHead
-                  title="What to offer"
-                  caption="Highest price that still earns each tier — your assumptions, rent estimates held constant"
+                  title="What to offer, by legacy tier"
+                  caption="Highest price that still earns each threshold rating — rent estimates held constant"
                 />
-                {(() => {
-                  const best = ranked[0];
-                  const bestSolution = offers.find((o) => o.key === best.key);
-                  const up = nextTierUp(best.s.rating);
-                  const target = up ? bestSolution?.byTier[up] : null;
-                  const asking = Number(price);
-                  return (
-                    <p className="max-w-[62ch] py-3 font-serif text-[15.5px] leading-[1.6] text-prose [text-wrap:pretty]">
-                      {best.s.rating === "Rare"
-                        ? `${DISPLAY_LABEL[best.key]} is already Rare at the asking price of ${usdWhole(asking)}.`
-                        : up && target != null
-                          ? `At ${usdWhole(asking)}, ${DISPLAY_LABEL[best.key].toLowerCase()} rates ${best.s.rating}. To make it ${up}, get the price to ${usdWhole(Math.min(target, asking))} — ${
-                              target >= asking
-                                ? "the asking price already qualifies once other terms hold"
-                                : `${usdWhole(asking - target)} below asking`
-                            }.`
-                          : `At ${usdWhole(asking)}, ${DISPLAY_LABEL[best.key].toLowerCase()} rates ${best.s.rating}, and the next tier is out of reach at any realistic price with these rents.`}
-                    </p>
-                  );
-                })()}
                 <div className="flex flex-col">
                   {offers.map((o) => {
                     const scenario = ranked.find((r) => r.key === o.key);
@@ -1143,75 +1315,63 @@ export default function Home() {
                         key={o.key}
                         className="flex flex-wrap items-baseline gap-x-4 gap-y-2 border-b border-rule py-[11px]"
                       >
-                        <span className="w-[150px] font-serif text-[15px] font-medium">
+                        <span className="w-[150px] text-[14px] font-bold">
                           {DISPLAY_LABEL[o.key]}
                         </span>
-                        {(["Rare", "Fantastic", "Great", "Good"] as Rating[]).map(
-                          (tier) => {
-                            const p = o.byTier[tier];
-                            const achievedNow = scenario.s.rating === tier;
-                            return (
-                              <span
-                                key={tier}
-                                className={`rounded-[2px] border px-2 py-[3px] text-[11.5px] tabular-nums ${
-                                  achievedNow ? "font-semibold" : ""
-                                }`}
-                                style={{
-                                  borderColor: RATING_COLORS[tier],
-                                  color: p == null ? "#7a7165" : RATING_COLORS[tier],
-                                  background: achievedNow
-                                    ? "rgba(150,85,42,.06)"
-                                    : "transparent",
-                                  borderStyle: p == null ? "dashed" : "solid",
-                                }}
-                                title={
-                                  p == null
-                                    ? `${tier} is out of reach at any realistic price with these rents and expenses.`
-                                    : p >= o.ceiling
-                                      ? `${tier} holds even past ${usdWhole(o.ceiling)}.`
-                                      : `Offer at or below ${usdWhole(p)} and this scenario rates ${tier}.`
-                                }
-                              >
-                                {tier}{" "}
-                                {p == null
-                                  ? "out of reach"
+                        {(["Rare", "Fantastic", "Great", "Good"] as Rating[]).map((tr) => {
+                          const p = o.byTier[tr];
+                          const achievedNow = scenario.s.rating === tr;
+                          return (
+                            <span
+                              key={tr}
+                              className={`rounded-[5px] border px-2 py-[3px] text-[11.5px] tabular-nums ${achievedNow ? "font-bold" : ""}`}
+                              style={{
+                                borderColor: RATING_COLORS[tr],
+                                color: p == null ? "#8a8780" : RATING_COLORS[tr],
+                                background: achievedNow ? "rgba(244,197,66,.12)" : "transparent",
+                                borderStyle: p == null ? "dashed" : "solid",
+                              }}
+                              title={
+                                p == null
+                                  ? `${tr} is out of reach at any realistic price with these rents and expenses.`
                                   : p >= o.ceiling
-                                    ? `at any price`
-                                    : `≤ ${usdWhole(p)}`}
-                              </span>
-                            );
-                          }
-                        )}
+                                    ? `${tr} holds even past ${usdWhole(o.ceiling)}.`
+                                    : `Offer at or below ${usdWhole(p)} and this strategy rates ${tr} on the legacy thresholds.`
+                              }
+                            >
+                              {tr}{" "}
+                              {p == null
+                                ? "out of reach"
+                                : p >= o.ceiling
+                                  ? "at any price"
+                                  : `≤ ${usdWhole(p)}`}
+                            </span>
+                          );
+                        })}
                       </div>
                     );
                   })}
                 </div>
                 <p className="mt-2 text-[11.5px] leading-[1.6] text-label">
-                  Solved against the same math as the cards above: each figure
-                  is the most you can pay and still hit the tier, assuming the
-                  rent estimates hold. A lower approved Section 8 rent or a
-                  softer market comp moves every number down — re-run after
-                  verifying rents.
+                  The legacy threshold tiers (Rare ≥ $400/mo cash flow · ≥12%
+                  cash-on-cash · ≥8% cap rate, and so on) complement the Pencil
+                  Score&apos;s Maximum Buy Price above: that answers &ldquo;what
+                  price hits my required return&rdquo;, these answer &ldquo;what
+                  price hits each rating&rdquo;.
                 </p>
               </section>
             )}
 
             {data.marketHealth && (
               <div className="flex flex-wrap gap-x-6 gap-y-1 border-y border-rule py-3 text-[13px]">
-                <span className="font-semibold">
+                <span className="font-bold">
                   Market health ({data.marketHealth.countyName})
                   <InfoTip text="County trajectory: 5-year change from Census ACS plus BLS unemployment. Shrinking population is the classic risk hiding behind cheap, high-cash-flow markets — rents and values erode and vacancies stretch." />
                 </span>
                 {data.marketHealth.populationChangePct5yr != null && (
-                  <span
-                    className={
-                      data.marketHealth.populationChangePct5yr < 0
-                        ? "text-negative"
-                        : ""
-                    }
-                  >
+                  <span className={data.marketHealth.populationChangePct5yr < 0 ? "text-negative" : ""}>
                     Population{" "}
-                    <b>
+                    <b className="tabular-nums">
                       {data.marketHealth.populationChangePct5yr >= 0 ? "+" : ""}
                       {data.marketHealth.populationChangePct5yr.toFixed(1)}%
                     </b>{" "}
@@ -1224,7 +1384,7 @@ export default function Home() {
                 {data.marketHealth.valueChangePct5yr != null && (
                   <span>
                     Median value{" "}
-                    <b>
+                    <b className="tabular-nums">
                       {data.marketHealth.valueChangePct5yr >= 0 ? "+" : ""}
                       {data.marketHealth.valueChangePct5yr.toFixed(0)}%
                     </b>{" "}
@@ -1235,18 +1395,11 @@ export default function Home() {
                   </span>
                 )}
                 {data.marketHealth.unemploymentPct != null && (
-                  <span
-                    className={
-                      data.marketHealth.unemploymentPct >= 7 ? "text-negative" : ""
-                    }
-                  >
+                  <span className={data.marketHealth.unemploymentPct >= 7 ? "text-negative" : ""}>
                     Unemployment{" "}
-                    <b>{data.marketHealth.unemploymentPct.toFixed(1)}%</b>
+                    <b className="tabular-nums">{data.marketHealth.unemploymentPct.toFixed(1)}%</b>
                     {data.marketHealth.unemploymentAsOf && (
-                      <span className="text-label">
-                        {" "}
-                        ({data.marketHealth.unemploymentAsOf})
-                      </span>
+                      <span className="text-label"> ({data.marketHealth.unemploymentAsOf})</span>
                     )}
                   </span>
                 )}
@@ -1255,25 +1408,26 @@ export default function Home() {
 
             <section className="flex flex-col">
               <SectionHead
-                title="The scenarios"
-                caption="Monthly, after mortgage, taxes, insurance, reserves, management and vacancy"
+                title="Which strategy pencils best"
+                caption="Monthly, after mortgage, taxes, insurance, reserves, management and empty months"
               />
               {ranked.length === 0 && (
-                <p className="max-w-[62ch] py-[18px] font-serif text-[16px] leading-[1.6] text-body">
-                  No scenario can be computed without a rent source. Configure a
-                  data source in the sidebar, or enter a real market rent under{" "}
-                  <b className="font-semibold">Market rent override</b> to
-                  underwrite the long-term case by hand.
+                <p className="max-w-[64ch] py-[18px] text-[14.5px] leading-[1.6] text-body">
+                  Nothing can be penciled without a rent source. Switch a data
+                  source back on, or enter a market rent under{" "}
+                  <b className="font-bold">Market rent override</b>.
                 </p>
               )}
               {ranked.map((r) => {
                 const s = r.s;
-                const a = assumptionsFull!;
+                const a = assumptionsFull;
+                const bScore = scoreInputs ? pencilScore(s, scoreInputs) : 0;
+                const bTier = tierForScore(bScore);
                 const outflow = s.expenses.totalMonthly + s.monthlyPI;
                 const t = outflow || 1;
-                const insMaint = s.expenses.insurance + s.expenses.maintenance;
-                const vacOrUtil =
-                  r.key === "str" ? s.expenses.other : s.expenses.vacancy;
+                const insMaintCapex =
+                  s.expenses.insurance + s.expenses.maintenance + s.expenses.capex;
+                const dscr = dscrOf(s);
                 const sub =
                   r.key === "market"
                     ? `${usdWhole(s.monthlyRent)}/mo rent · ${
@@ -1285,7 +1439,7 @@ export default function Home() {
                       ? `${usdWhole(s.monthlyRent)}/mo rent · Fair Market Rent × ${a.paymentStandardPct}%`
                       : `${usdWhole(s.monthlyRent)}/mo revenue${
                           data.mashvisor?.str?.occupancyPct != null
-                            ? ` · ${Math.round(data.mashvisor.str.occupancyPct)}% occ`
+                            ? ` · ${Math.round(data.mashvisor.str.occupancyPct)}% occupancy`
                             : ""
                         }${
                           data.mashvisor?.str?.nightlyRate != null
@@ -1301,33 +1455,37 @@ export default function Home() {
                     key={r.key}
                     className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-x-7 gap-y-5 border-b border-rule py-5"
                   >
-                    <div className="flex flex-col gap-[5px]">
-                      <h4 className="font-serif text-[19px] font-medium">
+                    <div className="flex flex-col gap-[7px]">
+                      <div className="flex flex-wrap items-baseline gap-[9px]">
+                        <span className="text-[30px] font-extrabold leading-none tracking-[-.04em] tabular-nums">
+                          {bScore}
+                        </span>
+                        <TierBadge tier={bTier} />
+                      </div>
+                      <h4 className="text-[16px] font-bold tracking-[-.018em]">
                         {DISPLAY_LABEL[r.key]}
                       </h4>
-                      <span className="text-[12px] text-label">{sub}</span>
-                      <span className="mt-[3px] flex items-center gap-[5px]">
-                        <RatingBadge rating={s.rating} />
-                        {s.ratingDetail.almost && (
-                          <AlmostChip almost={s.ratingDetail.almost} />
-                        )}
+                      <span className="text-[12px] leading-[1.5] text-label">{sub}</span>
+                      <span className="mt-1 flex flex-wrap items-center gap-[5px]">
+                        <LegacyBadge rating={s.rating} />
+                        {s.ratingDetail.almost && <AlmostChip almost={s.ratingDetail.almost} />}
                       </span>
                       <WhyRating s={s} units={a.units} />
                     </div>
-                    <div className="flex flex-col gap-[14px]">
+                    <div className="flex flex-col gap-[13px]">
                       <div className="flex flex-col gap-[3px]">
-                        <span className="text-[10.5px] font-semibold uppercase tracking-[.1em] text-label">
+                        <span className="text-[10.5px] font-bold uppercase tracking-[.09em] text-label">
                           Monthly cash flow, after the mortgage
                         </span>
                         <span
-                          className={`font-serif text-[33px] font-medium leading-none ${cfClass(s.monthlyCashFlow)}`}
+                          className={`text-[30px] font-extrabold leading-none tracking-[-.032em] tabular-nums ${cfClass(s.monthlyCashFlow)}`}
                         >
                           {signedUsd(s.monthlyCashFlow)}/mo
                         </span>
                       </div>
-                      <div className="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-x-4 gap-y-3">
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(92px,1fr))] gap-x-[14px] gap-y-[11px]">
                         <Metric
-                          label={r.key === "str" ? "Monthly revenue" : "Monthly rent"}
+                          label={r.key === "str" ? "Revenue" : "Rent"}
                           value={`${usdWhole(s.monthlyRent)}/mo`}
                           tip={
                             r.key === "str"
@@ -1336,80 +1494,79 @@ export default function Home() {
                           }
                         />
                         <Metric
-                          label="Cash-on-cash return"
+                          label="Cash-on-cash"
                           value={pct1(s.cashOnCashPct)}
-                          tip="A year of cash flow divided by the cash you actually put in — down payment, closing costs and rehab. Answers: what does this deal pay on my money?"
+                          tip="A year of cash flow divided by the cash you actually put in — down payment, closing costs and rehab."
                         />
                         <Metric
                           label="Cap rate"
                           value={pct1(s.capRatePct)}
-                          tip="Capitalization rate: a year of income after operating expenses, divided by the purchase price. It ignores the mortgage, so it compares houses rather than loans."
+                          tip="Capitalization rate: a year of income after operating expenses, divided by the purchase price. Ignores the mortgage."
                         />
                         <Metric
-                          label="Gross rent multiple"
-                          value={s.grm.toFixed(1)}
-                          tip="Purchase price divided by one year of rent. Lower is cheaper: 4 means a year's rent covers a quarter of the price, before any expenses."
+                          label="Debt coverage"
+                          value={Number.isFinite(dscr) ? dscr.toFixed(2) + "x" : "—"}
+                          tip="DSCR: yearly income after operating expenses divided by the yearly mortgage payment. Above 1.25 is what most lenders want to see."
                         />
                         <Metric
-                          label="Net income, yearly"
+                          label="Net income, yr"
                           value={usdWhole(s.noi)}
-                          tip="Net operating income: a year of rent minus operating expenses — taxes, insurance, reserves, management, vacancy — but before any mortgage payment."
+                          tip="Net operating income: a year of rent minus operating expenses — taxes, insurance, reserves, management, empty months — before any mortgage payment."
                         />
                         <Metric
                           label="Cash invested"
                           value={usdWhole(s.cashInvested)}
-                          tip="Down payment plus closing costs plus rehab budget — the money that actually leaves your account to buy the house."
+                          tip="Down payment plus closing costs plus rehab budget — the money that actually leaves your account."
+                        />
+                        <Metric
+                          label="Gross rent multiple"
+                          value={s.grm.toFixed(1)}
+                          tip="Purchase price divided by one year of rent. Lower is cheaper: 4 means a year's rent covers a quarter of the price."
                         />
                       </div>
                       <div className="flex flex-col gap-[5px]">
-                        <div className="flex h-2 overflow-hidden rounded-[1px] bg-bar-track">
-                          <span style={{ width: `${((s.monthlyPI / t) * 100).toFixed(1)}%`, background: "#96552a" }} />
-                          <span style={{ width: `${((s.expenses.taxes / t) * 100).toFixed(1)}%`, background: "#b4794c" }} />
-                          <span style={{ width: `${((insMaint / t) * 100).toFixed(1)}%`, background: "#c9a077" }} />
-                          <span style={{ width: `${((s.expenses.management / t) * 100).toFixed(1)}%`, background: "#6b6257" }} />
-                          <span style={{ width: `${(((s.expenses.vacancy + s.expenses.other) / t) * 100).toFixed(1)}%`, background: "#b9b0a2" }} />
+                        <div className="flex h-2 overflow-hidden rounded-[4px] bg-bar-track">
+                          <span style={{ width: `${((s.monthlyPI / t) * 100).toFixed(1)}%`, background: "#171717" }} />
+                          <span style={{ width: `${((s.expenses.taxes / t) * 100).toFixed(1)}%`, background: "#4a4a46" }} />
+                          <span style={{ width: `${((insMaintCapex / t) * 100).toFixed(1)}%`, background: "#7a7a73" }} />
+                          <span style={{ width: `${((s.expenses.management / t) * 100).toFixed(1)}%`, background: "#b0aa9a" }} />
+                          <span style={{ width: `${(((s.expenses.vacancy + s.expenses.other) / t) * 100).toFixed(1)}%`, background: "#f4c542" }} />
                         </div>
-                        <span className="text-[11.5px] text-label">
-                          {usdWhole(outflow)} leaves each month: mortgage{" "}
-                          {usdWhole(s.monthlyPI)} · property tax{" "}
-                          {usdWhole(s.expenses.taxes)} · insurance and repair
-                          reserve {usdWhole(insMaint)} · management{" "}
-                          {usdWhole(s.expenses.management)} ·{" "}
+                        <span className="text-[11.5px] leading-[1.5] text-label">
+                          {usdWhole(outflow)} out: mortgage {usdWhole(s.monthlyPI)} · tax{" "}
+                          {usdWhole(s.expenses.taxes)} · insurance, maintenance and CapEx{" "}
+                          {usdWhole(insMaintCapex)} · management {usdWhole(s.expenses.management)} ·{" "}
                           {r.key === "str"
-                            ? `utilities and supplies ${usdWhole(vacOrUtil)}`
-                            : `empty-months allowance ${usdWhole(vacOrUtil)}`}
+                            ? `utilities ${usdWhole(s.expenses.other)}`
+                            : `empty months ${usdWhole(s.expenses.vacancy)}`}
                         </span>
                       </div>
                     </div>
                     <div className="flex flex-col gap-2">
-                      <p className="m-0 font-serif text-[14px] leading-[1.6] text-[#4a423a]">
-                        {bandNote(r.key, scenarios!, a, {
-                          occupancyPct: data.mashvisor?.str?.occupancyPct,
-                          revenue: scenarios!.str?.monthlyRent,
-                        })}
+                      <p className="m-0 text-[13px] leading-[1.6] text-body">
+                        {bandNote(r.key, scenarios!, a, data.mashvisor?.str?.occupancyPct)}
                       </p>
-                      {r.key === "market" &&
-                        scenarios!.marketRentSource === "FMR" && (
-                          <p className="m-0 text-[11.5px] leading-[1.6] text-label">
-                            Rent here is the area-wide HUD Fair Market Rent, not
-                            an estimate for this specific property. In cheaper
-                            submarkets actual rent often runs well below it —
-                            verify with local comps.
-                          </p>
-                        )}
+                      {r.key === "market" && scenarios!.marketRentSource === "FMR" && (
+                        <p className="m-0 text-[11.5px] leading-[1.6] text-label">
+                          Rent here is the area-wide HUD Fair Market Rent, not an
+                          estimate for this specific property. In cheaper
+                          submarkets actual rent often runs well below it —
+                          verify with local comps.
+                        </p>
+                      )}
                       {r.key === "market" &&
                         scenarios!.marketRentSource === "local ACS median" && (
                           <p className="m-0 text-[11.5px] leading-[1.6] text-label">
                             Rent here uses the county&apos;s median rent for this
                             bedroom count (Census ACS, inflated to current)
                             because the HUD Fair Market Rent for this area runs
-                            above what local units actually rent for. This is
-                            the conservative estimate; verify with local comps.
+                            above what local units actually rent for. This is the
+                            conservative estimate; verify with local comps.
                           </p>
                         )}
                       {s8AboveMarket && (
-                        <p className="m-0 border-l-[3px] border-warn bg-accent-tint py-2 pl-3 font-serif text-[13px] leading-[1.6] text-warn-ink">
-                          <b className="font-semibold">
+                        <p className="m-0 rounded-[8px] border border-[#f0dba8] border-l-4 border-l-warn bg-accent-tint px-3 py-2 text-[12.5px] leading-[1.6] text-warn-ink">
+                          <b className="font-bold">
                             Heads up: this assumes {usdWhole(s.monthlyRent)}/mo —
                             above the estimated market rent of{" "}
                             {usdWhole(scenarios!.market!.monthlyRent)}/mo.
@@ -1417,9 +1574,7 @@ export default function Home() {
                           Housing authorities run a &ldquo;rent
                           reasonableness&rdquo; check and won&apos;t approve rent
                           above comparable unassisted units. Call{" "}
-                          {cityLabel
-                            ? `the ${cityLabel} housing authority`
-                            : "the local housing authority"}{" "}
+                          {cityLabel ? `the ${cityLabel} housing authority` : "the local housing authority"}{" "}
                           to ask what they&apos;d approve for this specific unit
                           (
                           <a
@@ -1430,8 +1585,8 @@ export default function Home() {
                           >
                             HUD PHA directory
                           </a>
-                          ), or lower the payment standard % for the
-                          conservative case.
+                          ), or lower the payment standard % for the conservative
+                          case.
                         </p>
                       )}
                       {r.key === "s8" && (
@@ -1439,7 +1594,7 @@ export default function Home() {
                           <summary className="cursor-pointer text-label">
                             How the Section 8 numbers work
                           </summary>
-                          <div className="mt-2 flex flex-col gap-2 text-[12px] leading-[1.6] text-[#4a423a]">
+                          <div className="mt-2 flex flex-col gap-2 text-[12px] leading-[1.6] text-body">
                             <p>
                               HUD publishes a <b>Fair Market Rent (FMR)</b> for
                               every area — the 40th-percentile gross rent, i.e.
@@ -1447,29 +1602,24 @@ export default function Home() {
                               (ZIP-level &ldquo;Small Area&rdquo; FMR where
                               available). The local housing authority (PHA) sets
                               a <b>payment standard</b> between 90% and 120% of
-                              FMR — this card assumes{" "}
+                              FMR — this strategy assumes{" "}
                               <b>{a.paymentStandardPct}%</b>. The voucher covers
                               the gap between the tenant&apos;s ~30% income
                               contribution and the approved rent, paid directly
                               to you.
                             </p>
                             <p>
-                              Vacancy defaults to 2% (vs 5% market) because the
-                              voucher portion keeps paying while a tenant stays,
-                              and demand for voucher-ready units is deep.
+                              Empty months default to 2% (vs 5% market) because
+                              the voucher portion keeps paying while a tenant
+                              stays, and demand for voucher-ready units is deep.
                               Offsets: annual PHA inspections, and initial
                               lease-up takes longer.
                             </p>
                             <p>
                               <b>The number to verify:</b> the PHA won&apos;t
                               approve rent above comparable unassisted units
-                              nearby (&ldquo;rent reasonableness&rdquo;). In
-                              soft markets FMR can sit far above real market
-                              rent, making this card look better than what the
-                              PHA will actually approve. Call{" "}
-                              {cityLabel
-                                ? `the ${cityLabel} housing authority`
-                                : "the local housing authority"}{" "}
+                              nearby (&ldquo;rent reasonableness&rdquo;). Call{" "}
+                              {cityLabel ? `the ${cityLabel} housing authority` : "the local housing authority"}{" "}
                               with this specific unit before relying on FMR ×
                               payment standard —{" "}
                               <a
@@ -1495,230 +1645,335 @@ export default function Home() {
               <section className="flex flex-col">
                 <SectionHead title="Line by line" caption="Monthly unless noted" />
                 <div className="overflow-x-auto">
-                <div className="grid min-w-[560px] grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
-                  <span className="border-b border-rule py-[10px]" />
-                  {(["Market rent", "Section 8", "Short-term"] as const).map(
-                    (h, i) => (
+                  <div className="grid min-w-[560px] grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))]">
+                    <span className="border-b border-rule py-[10px]" />
+                    {(["Traditional", "Section 8", "Short-term"] as const).map((h, i) => (
                       <span
                         key={h}
-                        className={`border-b border-rule py-[10px] text-right text-[12.5px] font-medium ${i === 2 ? "pl-3" : "px-3"}`}
+                        className={`border-b border-rule py-[10px] text-right text-[12.5px] font-semibold ${i === 2 ? "pl-3" : "px-3"}`}
                       >
                         {h}
                       </span>
-                    )
-                  )}
-                  {(() => {
-                    const a = assumptionsFull!;
-                    const cols: (ScenarioResult | null)[] = [
-                      scenarios!.market,
-                      scenarios!.s8,
-                      scenarios!.str,
-                    ];
-                    const cells = (
-                      fn: (s: ScenarioResult, isStr: boolean) => React.ReactNode,
-                      opts?: { emphasis?: boolean; last?: boolean }
-                    ) =>
-                      cols.map((s, i) => (
-                        <span
-                          key={i}
-                          className={`py-[9px] text-right text-[13px] ${
-                            i === 2 ? "pl-3" : "px-3"
-                          } ${
-                            opts?.emphasis
-                              ? "border-b border-ink py-3 text-[15px] font-semibold"
-                              : opts?.last
-                                ? ""
-                                : "border-b border-rule-light"
-                          }`}
-                        >
-                          {s ? fn(s, i === 2) : <span className="text-label">—</span>}
-                        </span>
-                      ));
-                    const label = (
-                      text: string,
-                      opts?: { title?: string; emphasis?: boolean; last?: boolean }
-                    ) => (
-                      <span
-                        title={opts?.title}
-                        className={`py-[9px] text-[13px] text-[#4a423a] ${
-                          opts?.title ? "cursor-help" : ""
-                        } ${
-                          opts?.emphasis
-                            ? "border-b border-ink py-3 text-[13.5px] font-semibold text-ink"
-                            : opts?.last
-                              ? ""
-                              : "border-b border-rule-light"
-                        }`}
-                      >
-                        {text}
-                      </span>
-                    );
-                    return (
-                      <>
-                        {label("Gross income")}
-                        {cells((s) => usdWhole(s.monthlyRent + a.otherMonthlyIncome))}
-                        {label("Mortgage (principal + interest)", {
-                          title:
-                            "Principal and interest on the loan. Taxes and insurance are listed separately below, not escrowed into this figure.",
-                        })}
-                        {cells((s) => usdWhole(s.monthlyPI))}
-                        {label("Taxes, insurance, reserves")}
-                        {cells((s) =>
-                          usdWhole(
-                            s.expenses.taxes +
-                              s.expenses.insurance +
-                              s.expenses.maintenance
-                          )
-                        )}
-                        {label("Management")}
-                        {cells((s) => usdWhole(s.expenses.management))}
-                        {label("Empty-months allowance", {
-                          title:
-                            "Money set aside for the months between tenants, taken as a percentage of rent.",
-                        })}
-                        {cells((s, isStr) =>
-                          isStr ? (
-                            <span className="text-label">already in revenue</span>
-                          ) : (
-                            usdWhole(s.expenses.vacancy)
-                          )
-                        )}
-                        {label("Utilities & supplies")}
-                        {cells((s, isStr) =>
-                          isStr ? (
-                            usdWhole(s.expenses.other)
-                          ) : s.expenses.other > 0 ? (
-                            usdWhole(s.expenses.other)
-                          ) : (
-                            <span className="text-label">tenant pays</span>
-                          )
-                        )}
-                        <span className="border-y border-ink py-3 text-[13.5px] font-semibold">
-                          Cash flow after the mortgage
-                        </span>
-                        {cols.map((s, i) => (
+                    ))}
+                    {(() => {
+                      const a = assumptionsFull;
+                      const cols: (ScenarioResult | null)[] = [
+                        scenarios!.market,
+                        scenarios!.s8,
+                        scenarios!.str,
+                      ];
+                      const cells = (
+                        fn: (s: ScenarioResult, isStr: boolean) => React.ReactNode,
+                        opts?: { emphasis?: boolean; last?: boolean }
+                      ) =>
+                        cols.map((s, i) => (
                           <span
                             key={i}
-                            className={`border-y border-ink py-3 text-right text-[15px] font-semibold ${
-                              i === 2 ? "pl-3" : "px-3"
-                            } ${s ? cfClass(s.monthlyCashFlow) : "text-label"}`}
+                            className={`py-[9px] text-right text-[13px] tabular-nums ${i === 2 ? "pl-3" : "px-3"} ${
+                              opts?.emphasis
+                                ? "border-b border-ink py-3 text-[15px] font-bold"
+                                : opts?.last
+                                  ? ""
+                                  : "border-b border-rule"
+                            }`}
                           >
-                            {s ? signedUsd(s.monthlyCashFlow) : "—"}
+                            {s ? fn(s, i === 2) : <span className="text-label">—</span>}
                           </span>
-                        ))}
-                        {label("Cash-on-cash return", {
-                          title:
-                            "A year of cash flow divided by the cash you put in — down payment, closing costs and rehab.",
-                        })}
-                        {cells((s) => pct1(s.cashOnCashPct))}
-                        {label("Cap rate", {
-                          title:
-                            "Capitalization rate: yearly income after operating expenses, divided by the purchase price. Ignores the mortgage.",
-                        })}
-                        {cells((s) => pct1(s.capRatePct))}
-                        {label("Net income, yearly", {
-                          title:
-                            "Net operating income: a year of rent minus operating expenses, before any mortgage payment.",
-                        })}
-                        {cells((s) => usdWhole(s.noi))}
-                        {label("Gross rent multiple", {
-                          title:
-                            "Gross rent multiple: purchase price divided by one year of rent. Lower is cheaper.",
-                          last: true,
-                        })}
-                        {cells((s) => s.grm.toFixed(1), { last: true })}
-                      </>
-                    );
-                  })()}
-                </div>
+                        ));
+                      const label = (
+                        text: string,
+                        opts?: { title?: string; last?: boolean }
+                      ) => (
+                        <span
+                          title={opts?.title}
+                          className={`py-[9px] text-[13px] text-body ${opts?.title ? "cursor-help" : ""} ${opts?.last ? "" : "border-b border-rule"}`}
+                        >
+                          {text}
+                        </span>
+                      );
+                      return (
+                        <>
+                          {label("Gross income")}
+                          {cells((s) => usdWhole(s.monthlyRent + a.otherMonthlyIncome))}
+                          {label("Mortgage (principal + interest)", {
+                            title:
+                              "Principal and interest on the loan. Taxes and insurance are listed separately below, not escrowed into this figure.",
+                          })}
+                          {cells((s) => usdWhole(s.monthlyPI))}
+                          {label("Taxes, insurance, reserves")}
+                          {cells((s) =>
+                            usdWhole(s.expenses.taxes + s.expenses.insurance + s.expenses.maintenance)
+                          )}
+                          {label("CapEx reserve", {
+                            title:
+                              "Money set aside each month for roof, HVAC and other big-ticket replacements — sized to the rent.",
+                          })}
+                          {cells((s) => usdWhole(s.expenses.capex))}
+                          {label("Management")}
+                          {cells((s) => usdWhole(s.expenses.management))}
+                          {label("Empty-months allowance", {
+                            title:
+                              "Money set aside for the months between tenants, taken as a percentage of rent.",
+                          })}
+                          {cells((s, isStr) =>
+                            isStr ? (
+                              <span className="text-label">already in revenue</span>
+                            ) : (
+                              usdWhole(s.expenses.vacancy)
+                            )
+                          )}
+                          {label("Utilities & supplies")}
+                          {cells((s, isStr) =>
+                            isStr ? (
+                              usdWhole(s.expenses.other)
+                            ) : s.expenses.other > 0 ? (
+                              usdWhole(s.expenses.other)
+                            ) : (
+                              <span className="text-label">tenant pays</span>
+                            )
+                          )}
+                          <span className="border-y border-ink py-3 text-[13.5px] font-bold">
+                            Cash flow after the mortgage
+                          </span>
+                          {cols.map((s, i) => (
+                            <span
+                              key={i}
+                              className={`border-y border-ink py-3 text-right text-[15px] font-bold tabular-nums ${i === 2 ? "pl-3" : "px-3"} ${s ? cfClass(s.monthlyCashFlow) : "text-label"}`}
+                            >
+                              {s ? signedUsd(s.monthlyCashFlow) : "—"}
+                            </span>
+                          ))}
+                          {label("Cash-on-cash return", {
+                            title:
+                              "A year of cash flow divided by the cash you put in — down payment, closing costs and rehab.",
+                          })}
+                          {cells((s) => pct1(s.cashOnCashPct))}
+                          {label("Cap rate", {
+                            title:
+                              "Capitalization rate: yearly income after operating expenses, divided by the purchase price. Ignores the mortgage.",
+                          })}
+                          {cells((s) => pct1(s.capRatePct))}
+                          {label("Debt coverage (DSCR)", {
+                            title:
+                              "Yearly income after operating expenses divided by the yearly mortgage payment. Above 1.25 is what most lenders want to see.",
+                          })}
+                          {cells((s) => {
+                            const d = dscrOf(s);
+                            return Number.isFinite(d) ? d.toFixed(2) + "x" : "—";
+                          })}
+                          {label("Net income, yearly", {
+                            title:
+                              "Net operating income: a year of rent minus operating expenses, before any mortgage payment.",
+                          })}
+                          {cells((s) => usdWhole(s.noi))}
+                          {label("Gross rent multiple", {
+                            title:
+                              "Purchase price divided by one year of rent. Lower is cheaper.",
+                            last: true,
+                          })}
+                          {cells((s) => s.grm.toFixed(1), { last: true })}
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
               </section>
             )}
 
+            {active && (
+              <section className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-x-10 gap-y-7">
+                <div className="flex flex-col">
+                  <div className="flex flex-wrap items-baseline justify-between gap-[10px] border-b border-ink pb-[9px]">
+                    <h3 className="text-[19px] font-bold tracking-[-.02em]">Show your work</h3>
+                    {strategyTabs}
+                  </div>
+                  <span className="pb-[2px] pt-[10px] text-[11.5px] text-label">
+                    Net operating income for the {DISPLAY_LABEL[active.key].toLowerCase()}{" "}
+                    strategy, before any mortgage payment.
+                  </span>
+                  {(() => {
+                    const s = active.s;
+                    const a = assumptionsFull;
+                    const gross = s.monthlyRent + a.otherMonthlyIncome;
+                    const rows: [string, string, { bold?: boolean; neg?: boolean; inkRule?: boolean }][] = [
+                      ["Gross potential rent", usdWhole(s.monthlyRent * 12), {}],
+                      [
+                        "Other income",
+                        a.otherMonthlyIncome ? "+" + usdWhole(a.otherMonthlyIncome * 12) : usdWhole(0),
+                        {},
+                      ],
+                      [
+                        "Empty months and credit loss",
+                        "−" + usdWhole(s.expenses.vacancy * 12),
+                        { neg: true },
+                      ],
+                      [
+                        "Effective gross income",
+                        usdWhole((gross - s.expenses.vacancy) * 12),
+                        { bold: true, inkRule: true },
+                      ],
+                      ["Property taxes", "−" + usdWhole(s.expenses.taxes * 12), { neg: true }],
+                      ["Insurance", "−" + usdWhole(s.expenses.insurance * 12), { neg: true }],
+                      ["Maintenance", "−" + usdWhole(s.expenses.maintenance * 12), { neg: true }],
+                      ["CapEx reserve", "−" + usdWhole(s.expenses.capex * 12), { neg: true }],
+                      ["Management", "−" + usdWhole(s.expenses.management * 12), { neg: true }],
+                      [
+                        active.key === "str" ? "Utilities and supplies" : "Other expenses",
+                        s.expenses.other ? "−" + usdWhole(s.expenses.other * 12) : usdWhole(0),
+                        { neg: s.expenses.other > 0 },
+                      ],
+                    ];
+                    return (
+                      <>
+                        {rows.map(([labelText, value, o]) => (
+                          <div
+                            key={labelText}
+                            className={`flex items-baseline justify-between gap-[14px] py-2 ${
+                              o.inkRule ? "border-b border-ink" : "border-b border-rule"
+                            }`}
+                          >
+                            <span className={`text-[13px] ${o.bold ? "font-bold text-ink" : "text-body"}`}>
+                              {labelText}
+                            </span>
+                            <span
+                              className={`text-[13.5px] tabular-nums ${o.bold ? "font-bold" : ""} ${o.neg ? "text-negative" : "text-ink"}`}
+                            >
+                              {value}
+                            </span>
+                          </div>
+                        ))}
+                        <div className="flex items-baseline justify-between gap-[14px] border-b border-ink py-[11px]">
+                          <span className="text-[13.5px] font-extrabold">Net operating income</span>
+                          <span className="text-[17px] font-extrabold tabular-nums">
+                            {usdWhole(active.s.noi)}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline justify-between gap-[14px] border-b border-rule py-2">
+                          <span className="text-[13px] text-body">Mortgage, yearly</span>
+                          <span className="text-[13.5px] text-negative tabular-nums">
+                            −{usdWhole(active.s.monthlyPI * 12)}
+                          </span>
+                        </div>
+                        <div className="flex items-baseline justify-between gap-[14px] py-[11px]">
+                          <span className="text-[13.5px] font-extrabold">Cash flow, yearly</span>
+                          <span
+                            className={`text-[17px] font-extrabold tabular-nums ${cfClass(active.s.monthlyCashFlow)}`}
+                          >
+                            {signedUsd(active.s.monthlyCashFlow * 12)}
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {confidence && (
+                  <div className="flex flex-col">
+                    <div className="flex flex-wrap items-baseline justify-between gap-[10px] border-b border-ink pb-[9px]">
+                      <h3 className="text-[19px] font-bold tracking-[-.02em]">
+                        Where each number came from
+                      </h3>
+                      <span className="text-[12px] font-bold" style={{ color: confidence.color }}>
+                        {confidence.label}
+                      </span>
+                    </div>
+                    <span className="pb-[6px] pt-[10px] text-[11.5px] leading-[1.55] text-label">
+                      {confidence.note}
+                    </span>
+                    {confidence.rows.map((row) => (
+                      <div
+                        key={row.label}
+                        className="flex items-baseline justify-between gap-4 border-b border-rule py-[10px]"
+                      >
+                        <div className="flex flex-col gap-[1px]">
+                          <span className="text-[13px] text-body">{row.label}</span>
+                          <span className="text-[11.5px] text-label">{row.source}</span>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-[2px]">
+                          <span className="text-[13.5px] font-bold tabular-nums">{row.value}</span>
+                          <span
+                            className="rounded-[4px] px-[6px] py-[1px] text-[10px] font-bold uppercase tracking-[.05em]"
+                            style={{
+                              backgroundColor: CONF_PILL[row.conf].bg,
+                              color: CONF_PILL[row.conf].fg,
+                            }}
+                          >
+                            {row.conf}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                    {divergePct != null && divergePct > 0 && (
+                      <div className="mt-4 rounded-[8px] border border-[#f0dba8] border-l-4 border-l-warn bg-accent-tint px-[14px] py-[10px]">
+                        <p className="m-0 text-[13px] leading-[1.6] text-warn-ink">
+                          <b className="font-bold">Verify the market rent.</b>{" "}
+                          ATTOM&apos;s model says {usdWhole(data.attom!.rentalAvm!)}/mo, HUD
+                          says {usdWhole(scenarios!.fmrRent!)}/mo —{" "}
+                          {divergePct.toFixed(0)}% apart. Both are estimates; one
+                          real comp settles it. Section 8 keys off FMR either way.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+            )}
+
             {outlook && (outlook.stress || outlook.projection) && (
-              <section className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-x-11 gap-y-[34px]">
+              <section className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-x-10 gap-y-7">
                 {outlook.stress && (
                   <div className="flex flex-col">
-                    <SectionHead
-                      title="Stress test"
-                      caption="Market scenario"
-                    />
+                    <SectionHead title="Stress test" caption="Traditional strategy" />
                     <div className="flex flex-col">
                       {outlook.stress.map((row) => (
                         <div
                           key={row.label}
                           className="flex items-baseline justify-between gap-3 border-b border-rule py-[9px]"
                         >
-                          <span className="text-[13px] text-[#4a423a]">
-                            {row.label}
-                          </span>
-                          <span
-                            className={`text-[13px] font-semibold tabular-nums ${cfClass(row.monthlyCashFlow)}`}
-                          >
+                          <span className="text-[13px] text-body">{row.label}</span>
+                          <span className={`text-[13px] font-bold tabular-nums ${cfClass(row.monthlyCashFlow)}`}>
                             {signedUsd(row.monthlyCashFlow)}/mo
                           </span>
                         </div>
                       ))}
                     </div>
-                    <p className="mt-2 font-serif text-[13px] leading-[1.6] text-[#4a423a]">
+                    <p className="mt-2 text-[12.5px] leading-[1.6] text-body">
                       Rent −10%, empty months +5 points, rate +1 point — each
                       alone, then combined. A deal that only works when every
                       estimate is exactly right isn&apos;t a deal.
                     </p>
                   </div>
                 )}
-                {outlook.projection && assumptionsFull && (
+                {outlook.projection && (
                   <div className="flex flex-col">
-                    <SectionHead
-                      title="5-year hold"
-                      caption="Market scenario, rents held flat"
-                    />
+                    <SectionHead title="5-year hold" caption="Traditional strategy, rents held flat" />
                     <div className="flex flex-col">
                       {(
                         [
-                          [
-                            `Est. value in 5 yrs (${assumptionsFull.appreciationPctAnnual}%/yr)`,
-                            usdWhole(outlook.projection.futureValue),
-                          ],
+                          [`Est. value in 5 yrs (${adv.appreciationPctAnnual}%/yr)`, usdWhole(outlook.projection.futureValue)],
                           ["Loan balance then", usdWhole(outlook.projection.loanBalance)],
-                          [
-                            "Principal paid down by tenant",
-                            usdWhole(outlook.projection.equityPaydown),
-                          ],
-                          [
-                            "Cumulative cash flow (60 mo)",
-                            usdWhole(outlook.projection.cumulativeCashFlow),
-                          ],
-                          [
-                            `Net if sold (${assumptionsFull.sellingCostPct}% selling costs)`,
-                            usdWhole(outlook.projection.netIfSold),
-                          ],
-                          [
-                            "Total profit vs cash in",
-                            usdWhole(outlook.projection.totalProfit),
-                          ],
+                          ["Principal paid down by tenant", usdWhole(outlook.projection.equityPaydown)],
+                          ["Cumulative cash flow (60 mo)", usdWhole(outlook.projection.cumulativeCashFlow)],
+                          [`Net if sold (${adv.sellingCostPct}% selling costs)`, usdWhole(outlook.projection.netIfSold)],
+                          ["Total profit vs cash in", usdWhole(outlook.projection.totalProfit)],
                         ] as const
                       ).map(([labelText, value]) => (
                         <div
                           key={labelText}
                           className="flex items-baseline justify-between gap-3 border-b border-rule py-[9px]"
                         >
-                          <span className="text-[13px] text-[#4a423a]">
-                            {labelText}
-                          </span>
+                          <span className="text-[13px] text-body">{labelText}</span>
                           <span className="text-[13px] tabular-nums">{value}</span>
                         </div>
                       ))}
                       <div className="flex items-baseline justify-between gap-3 py-[9px]">
-                        <span className="flex items-center text-[13.5px] font-semibold">
+                        <span className="flex items-center text-[13.5px] font-bold">
                           Annualized total return
                           <InfoTip text="The compound annual growth rate on your invested cash if the 5-year projection plays out: (sale proceeds + all cash flow) relative to cash invested, annualized." />
                         </span>
                         <span
-                          className={`text-[15px] font-semibold tabular-nums ${
-                            outlook.projection.annualizedReturnPct > 0
-                              ? "text-positive"
-                              : "text-negative"
+                          className={`text-[15px] font-bold tabular-nums ${
+                            outlook.projection.annualizedReturnPct > 0 ? "text-positive" : "text-negative"
                           }`}
                         >
                           {outlook.projection.annualizedReturnPct.toFixed(1)}%/yr
@@ -1730,203 +1985,47 @@ export default function Home() {
               </section>
             )}
 
-            <section className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-x-11 gap-y-[34px]">
-              <div className="flex flex-col">
-                <h3 className="mb-1 border-b-2 border-ink pb-2 font-serif text-[21px] font-medium">
-                  What the analysis used
-                </h3>
-                {(
-                  [
-                    [
-                      "Market rent baseline",
-                      scenarios?.market
-                        ? `${usdWhole(scenarios.market.monthlyRent)}/mo`
-                        : "unavailable",
-                      scenarios?.market
-                        ? (scenarios.marketRentSource &&
-                            MARKET_SRC_LABEL[scenarios.marketRentSource]) ||
-                          "modelled"
-                        : "no HUD data, no ATTOM key",
-                    ],
-                    [
-                      "Section 8 rent",
-                      scenarios?.s8
-                        ? `${usdWhole(scenarios.s8.monthlyRent)}/mo`
-                        : "unavailable",
-                      scenarios?.s8
-                        ? `${adv.paymentStandardPct}% payment standard`
-                        : "needs HUD FMR",
-                    ],
-                    [
-                      "Airbnb revenue",
-                      scenarios?.str
-                        ? `${usdWhole(scenarios.str.monthlyRent)}/mo`
-                        : "unavailable",
-                      scenarios?.str
-                        ? "occupancy-adjusted, Mashvisor"
-                        : data.mashvisorError
-                          ? "Mashvisor unavailable"
-                          : "no Mashvisor key",
-                    ],
-                    [
-                      "Local median rent",
-                      scenarios?.acsRentForBeds != null
-                        ? `${usdWhole(scenarios.acsRentForBeds)}/mo`
-                        : "unavailable",
-                      scenarios?.acsRentForBeds != null
-                        ? (data.acsRent?.source ?? "Census ACS")
-                        : "needs a free Census key",
-                    ],
-                    [
-                      "Property tax rate",
-                      scenarios ? `${(scenarios.taxRate * 100).toFixed(2)}%/yr` : "—",
-                      scenarios?.taxSource ?? data.tax.source,
-                    ],
-                    [
-                      "Flood zone",
-                      data.flood.zone ? `Zone ${data.flood.zone}` : "none mapped",
-                      data.flood.highRisk
-                        ? "insurance +40% · FEMA flood map"
-                        : data.flood.moderateRisk
-                          ? "insurance +15% · FEMA flood map"
-                          : "no surcharge · FEMA flood map",
-                    ],
-                    [
-                      "Estimated value",
-                      data.attom?.avmValue != null
-                        ? usdWhole(data.attom.avmValue)
-                        : "unavailable",
-                      data.attom?.avmValue != null
-                        ? `automated valuation${
-                            data.attom.avmConfidence != null
-                              ? `, confidence ${data.attom.avmConfidence}/100`
-                              : ""
-                          }`
-                        : data.attomError
-                          ? "ATTOM unavailable"
-                          : "no ATTOM key",
-                    ],
-                    [
-                      "Last sale",
-                      data.attom?.lastSalePrice != null
-                        ? usdWhole(data.attom.lastSalePrice)
-                        : "unavailable",
-                      data.attom?.lastSalePrice != null
-                        ? (data.attom.lastSaleDate?.slice(0, 4) ?? "ATTOM")
-                        : data.attomError
-                          ? "ATTOM unavailable"
-                          : "no ATTOM key",
-                    ],
-                    [
-                      "Cash required",
-                      cashIn != null ? usdWhole(cashIn) : "—",
-                      `${adv.downPaymentPct}% down + ${adv.closingCostPct}% closing${
-                        adv.rehabCost > 0 ? " + rehab" : ""
-                      }`,
-                    ],
-                  ] as [string, string, string][]
-                ).map(([labelText, value, source], i, arr) => (
-                  <div
-                    key={labelText}
-                    className={`flex items-baseline justify-between gap-4 py-[10px] ${
-                      i < arr.length - 1 ? "border-b border-rule" : ""
-                    }`}
-                  >
-                    <span className="text-[13px] text-[#4a423a]">{labelText}</span>
-                    <span className="flex flex-col items-end gap-[1px]">
-                      <b
-                        className={`text-[13px] font-semibold ${
-                          value === "unavailable" ? "font-normal text-disabled" : ""
-                        }`}
-                      >
-                        {value}
-                      </b>
-                      <span className="text-right text-[12px] text-label">
-                        {source}
-                      </span>
-                    </span>
-                  </div>
-                ))}
-                {divergePct != null && divergePct > 0 && (
-                  <div className="mt-4 border-l-[3px] border-warn bg-accent-tint py-[10px] pl-[14px]">
-                    <p className="m-0 font-serif text-[14px] leading-[1.6] text-warn-ink">
-                      <b className="font-semibold">Verify the market rent.</b>{" "}
-                      ATTOM&apos;s model says {usdWhole(data.attom!.rentalAvm!)}
-                      /mo, HUD says {usdWhole(scenarios!.fmrRent!)}/mo —{" "}
-                      {divergePct.toFixed(0)}% apart. Both are estimates; one
-                      real comp settles it. Section 8 keys off FMR either way.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <FidelityCheck
-                data={data}
-                scenarios={scenarios}
-                price={price === "" ? 0 : Number(price)}
-                bedrooms={bedrooms === "" ? 3 : Number(bedrooms)}
-                mashvisorConfigured={sources?.mashvisor ?? false}
-              />
-            </section>
+            <FidelityCheck
+              data={data}
+              scenarios={scenarios}
+              price={price === "" ? 0 : Number(price)}
+              bedrooms={bedrooms === "" ? 3 : Number(bedrooms)}
+              mashvisorConfigured={sources?.mashvisor ?? false}
+            />
 
             {savedPins.length > 0 && (
               <section className="flex flex-col gap-[14px]">
-                <div className="flex flex-wrap items-baseline justify-between gap-[14px] border-b-2 border-ink pb-2">
-                  <h3 className="font-serif text-[21px] font-medium">
-                    Deal map{" "}
-                    <span className="text-[13px] font-normal text-label">
-                      {visiblePins.length} of {savedPins.length} shown
+                <div className="flex flex-wrap items-baseline justify-between gap-[14px] border-b border-ink pb-[9px]">
+                  <h3 className="text-[19px] font-bold tracking-[-.02em]">
+                    Pencil Map{" "}
+                    <span className="text-[13px] font-medium text-label">
+                      {visiblePins.length} of {savedPins.length} in My Pencils
                     </span>
                   </h3>
                   <div className="flex flex-wrap items-center gap-4">
                     <div className="flex items-center gap-2">
-                      <span className="text-[11.5px] text-label">Color by</span>
-                      <div className="flex gap-[14px]">
-                        {(
-                          [
-                            ["market", "Market"],
-                            ["s8", "Section 8"],
-                            ["str", "Airbnb"],
-                          ] as const
-                        ).map(([key, labelText]) => (
-                          <button
-                            key={key}
-                            onClick={() => setColorBy(key)}
-                            className={`cursor-pointer pb-[1px] text-[12px] ${
-                              colorBy === key
-                                ? "border-b-2 border-accent text-ink"
-                                : "border-b border-transparent text-label"
-                            }`}
-                          >
-                            {labelText}
-                          </button>
-                        ))}
-                      </div>
+                      <span className="text-[11.5px] text-label">Score by</span>
+                      {strategyTabs}
                     </div>
-                    <div className="flex items-center gap-3 text-[11.5px] text-[#4a423a]">
-                      {ALL_RATINGS.map((r) => {
-                        const on = ratingFilter.has(r);
+                    <div className="flex flex-wrap items-center gap-[11px] text-[11.5px] text-body">
+                      {PENCIL_TIERS.map((t) => {
+                        const on = tierFilter.has(t.short);
                         return (
                           <button
-                            key={r}
-                            title={`${on ? "Hide" : "Show"} ${r} deals`}
+                            key={t.short}
+                            title={`${on ? "Hide" : "Show"} ${t.label} deals`}
                             onClick={() =>
-                              setRatingFilter((prev) => {
+                              setTierFilter((prev) => {
                                 const next = new Set(prev);
-                                if (next.has(r)) next.delete(r);
-                                else next.add(r);
+                                if (next.has(t.short)) next.delete(t.short);
+                                else next.add(t.short);
                                 return next;
                               })
                             }
-                            className={`flex cursor-pointer items-center gap-[5px] ${
-                              on ? "" : "opacity-35"
-                            }`}
+                            className={`flex cursor-pointer items-center gap-[5px] ${on ? "" : "opacity-35"}`}
                           >
-                            <span
-                              className="h-2 w-2 rounded-full"
-                              style={{ background: RATING_COLORS[r] }}
-                            />
-                            {r}
+                            <span className="h-[9px] w-[9px] rounded-full" style={{ background: t.dot }} />
+                            {t.short}
                           </button>
                         );
                       })}
@@ -1934,144 +2033,130 @@ export default function Home() {
                   </div>
                 </div>
 
-                <PropertyMap
-                  pins={visiblePins}
-                  colorBy={colorBy}
-                  focusId={focusId}
-                />
+                <PropertyMap pins={visiblePins} colorBy={pinKey} focusId={focusId} />
 
                 <div className="overflow-x-auto">
-                <div className="grid min-w-[700px] grid-cols-[2fr_1fr_1fr_1fr_1fr_1.2fr_28px]">
-                  {["Property", "Price", "Market", "Sec. 8", "Airbnb", "Best play", ""].map(
-                    (h, i) => (
-                      <span
-                        key={h || "x"}
-                        className={`border-b border-ink py-[9px] text-[10.5px] font-semibold uppercase tracking-[.11em] text-label ${
-                          i >= 1 && i <= 4 ? "px-3 text-right" : i === 5 ? "pl-3" : ""
-                        }`}
-                      >
-                        {h}
-                      </span>
-                    )
-                  )}
-                  {[...visiblePins]
-                    .sort(
-                      (a, b) =>
-                        ((b[colorBy] ?? b.market ?? b.s8 ?? b.str)?.monthlyCashFlow ?? 0) -
-                        ((a[colorBy] ?? a.market ?? a.s8 ?? a.str)?.monthlyCashFlow ?? 0)
-                    )
-                    .map((p) => {
-                      const m = p[colorBy] ?? p.market ?? p.s8 ?? p.str;
-                      const plays: [string, PinMetrics | undefined][] = [
-                        ["Market rent", p.market],
-                        ["Section 8", p.s8],
-                        ["Short-term rental", p.str],
-                      ];
-                      let play = "—";
-                      let playCf = -Infinity;
-                      for (const [pl, pm] of plays) {
-                        if (pm && pm.monthlyCashFlow > playCf) {
-                          playCf = pm.monthlyCashFlow;
-                          play = pl;
-                        }
-                      }
-                      const cell = (
-                        metric: PinMetrics | undefined,
-                        key: ScenarioKey
-                      ) => (
+                  <div className="grid min-w-[860px] grid-cols-[1.8fr_1fr_0.7fr_1fr_1fr_1fr_0.8fr_1fr_1.3fr_28px]">
+                    {["Property", "Asking", "Score", "Market", "Sec. 8", "Airbnb", "Cap", "Investor value", "Verdict", ""].map(
+                      (h, i) => (
                         <span
-                          className={`cursor-pointer border-b border-rule px-3 py-[11px] text-right text-[13px] tabular-nums ${
-                            colorBy === key ? "font-semibold" : ""
-                          } ${metric ? cfClass(metric.monthlyCashFlow) : "text-label"}`}
-                          onClick={() => setFocusId(p.id)}
+                          key={h || "x"}
+                          className={`border-b border-ink py-[9px] text-[10px] font-bold uppercase tracking-[.09em] text-label ${
+                            i >= 1 && i <= 7 ? "px-[10px] text-right" : i === 8 ? "pl-[10px]" : ""
+                          }`}
                         >
-                          {metric ? signedUsd(metric.monthlyCashFlow) : "—"}
+                          {h}
                         </span>
-                      );
-                      return (
-                        <span key={p.id} className="contents">
+                      )
+                    )}
+                    {[...visiblePins]
+                      .sort((a, b) => {
+                        const ma = a[pinKey] ?? a.market ?? a.s8 ?? a.str;
+                        const mb = b[pinKey] ?? b.market ?? b.s8 ?? b.str;
+                        return (
+                          (mb?.score ?? -1) - (ma?.score ?? -1) ||
+                          (mb?.monthlyCashFlow ?? 0) - (ma?.monthlyCashFlow ?? 0)
+                        );
+                      })
+                      .map((p) => {
+                        const m = p[pinKey] ?? p.market ?? p.s8 ?? p.str;
+                        const t = pinTier(m);
+                        const cfCell = (metric: PinMetrics | undefined) => (
                           <span
+                            className={`cursor-pointer border-b border-rule px-[10px] py-[11px] text-right text-[13px] font-semibold tabular-nums ${
+                              metric ? cfClass(metric.monthlyCashFlow) : "text-label"
+                            }`}
                             onClick={() => setFocusId(p.id)}
-                            className="flex cursor-pointer items-center gap-[9px] border-b border-rule py-[11px] text-[13px] hover:bg-accent-tint"
                           >
+                            {metric ? signedUsd(metric.monthlyCashFlow) : "—"}
+                          </span>
+                        );
+                        return (
+                          <span key={p.id} className="contents">
                             <span
-                              className="h-2 w-2 shrink-0 rounded-full"
-                              style={{
-                                background: m ? RATING_COLORS[m.rating] : "#6b6257",
-                              }}
-                            />
-                            <span className="truncate">{p.address}</span>
-                          </span>
-                          <span
-                            onClick={() => setFocusId(p.id)}
-                            className="cursor-pointer border-b border-rule px-3 py-[11px] text-right text-[13px] text-[#4a423a] tabular-nums"
-                          >
-                            {usd(p.price)}
-                          </span>
-                          {cell(p.market, "market")}
-                          {cell(p.s8, "s8")}
-                          {cell(p.str, "str")}
-                          <span className="flex items-center gap-[7px] border-b border-rule py-[11px] pl-3 text-[12px]">
-                            <span className="text-[#4a423a]">{play}</span>
-                            {m && <RatingBadge rating={m.rating} small />}
-                            {m?.almost && (
-                              <span
-                                title={
-                                  m.gapText
-                                    ? `${m.gapText} away from ${m.almost}`
-                                    : `almost ${m.almost}`
-                                }
-                                className="text-[10px]"
-                                style={{ color: RATING_COLORS[m.almost] }}
-                              >
-                                almost {m.almost}
-                              </span>
-                            )}
-                          </span>
-                          <span className="flex items-center justify-end border-b border-rule py-[11px]">
-                            <button
-                              onClick={() => {
-                                setSavedPins((prev) =>
-                                  prev.filter((x) => x.id !== p.id)
-                                );
-                                if (focusId === p.id) setFocusId(null);
-                              }}
-                              title="Remove from map"
-                              className="cursor-pointer px-1 text-label hover:text-negative"
+                              onClick={() => setFocusId(p.id)}
+                              className="flex cursor-pointer items-center gap-[9px] border-b border-rule py-[11px] text-[13px] font-medium hover:bg-accent-tint"
                             >
-                              ✕
-                            </button>
+                              <span
+                                className="h-[9px] w-[9px] shrink-0 rounded-full"
+                                style={{ background: t?.dot ?? "#8a8780" }}
+                              />
+                              <span className="truncate">{p.address}</span>
+                            </span>
+                            <span
+                              onClick={() => setFocusId(p.id)}
+                              className="cursor-pointer border-b border-rule px-[10px] py-[11px] text-right text-[13px] text-body tabular-nums"
+                            >
+                              {usd(p.price)}
+                            </span>
+                            <span className="border-b border-rule px-[10px] py-[11px] text-right text-[14px] font-extrabold tabular-nums">
+                              {m?.score ?? "—"}
+                            </span>
+                            {cfCell(p.market)}
+                            {cfCell(p.s8)}
+                            {cfCell(p.str)}
+                            <span className="border-b border-rule px-[10px] py-[11px] text-right text-[13px] text-body tabular-nums">
+                              {m ? pct1(m.capRatePct) : "—"}
+                            </span>
+                            <span className="border-b border-rule px-[10px] py-[11px] text-right text-[13px] text-body tabular-nums">
+                              {p.investorValue != null ? usdWhole(p.investorValue) : "—"}
+                            </span>
+                            <span className="flex items-center gap-[6px] border-b border-rule py-[11px] pl-[10px]">
+                              {t && <TierBadge tier={t} small />}
+                              {m?.almost && (
+                                <span
+                                  title={m.gapText ? `${m.gapText} away from ${m.almost} (legacy tiers)` : `almost ${m.almost}`}
+                                  className="whitespace-nowrap text-[10px]"
+                                  style={{ color: RATING_COLORS[m.almost] }}
+                                >
+                                  almost {m.almost}
+                                </span>
+                              )}
+                            </span>
+                            <span className="flex items-center justify-end border-b border-rule py-[11px]">
+                              <button
+                                onClick={() => {
+                                  setSavedPins((prev) => prev.filter((x) => x.id !== p.id));
+                                  if (focusId === p.id) setFocusId(null);
+                                }}
+                                title="Remove from My Pencils"
+                                className="cursor-pointer px-1 text-label hover:text-negative"
+                              >
+                                ✕
+                              </button>
+                            </span>
                           </span>
-                        </span>
-                      );
-                    })}
-                </div>
+                        );
+                      })}
+                  </div>
                 </div>
               </section>
             )}
 
-            <p className="m-0 max-w-[96ch] border-t border-rule pt-4 text-[11.5px] leading-[1.75] text-label">
-              Ratings are per unit, measured on monthly cash flow after the
-              mortgage and cash-on-cash return.{" "}
-              <b className="font-semibold text-body">Rare</b> ≥ $400/mo, ≥12%
-              cash-on-cash, ≥8% cap rate ·{" "}
-              <b className="font-semibold text-body">Fantastic</b> ≥ $250/mo,
-              ≥10% cash-on-cash ·{" "}
-              <b className="font-semibold text-body">Great</b> ≥ $150/mo, ≥8%
-              cash-on-cash · <b className="font-semibold text-body">Good</b>{" "}
-              &gt; $50/mo, ≥5% cash-on-cash ·{" "}
-              <b className="font-semibold text-body">Poor</b> otherwise —
-              breaking even is not a goal. A dashed{" "}
-              <b className="font-semibold text-body">Almost</b> badge means the
-              deal misses the next tier by less than $50/mo, 1.5 points of
-              cash-on-cash or 1 point of cap rate. All figures are estimates
-              from public data — HUD Fair Market Rents, FEMA flood maps, the
-              Census geocoder, Census county data (taxes, rents, vacancy,
-              population), BLS unemployment and the FRED mortgage average —
-              plus ATTOM property records and Mashvisor short-term data where a
-              key is configured. Verify rents with local comparable rentals,
-              taxes with the county auditor and insurance with real quotes
-              before making an offer. Not professional advice.
+            <p className="m-0 max-w-[100ch] border-t border-border pt-4 text-[11.5px] leading-[1.75] text-label">
+              The Pencil Score is a weighted reading of monthly cash flow per
+              unit (30%), cash-on-cash return (25%), cap rate (15%), debt
+              coverage (15%) and asking price against investor value (15%),
+              scored against your required return.{" "}
+              <b className="font-bold text-body">Rare Pencil</b> 90+ ·{" "}
+              <b className="font-bold text-body">Fantastic</b> 80–89 ·{" "}
+              <b className="font-bold text-body">Great</b> 70–79 ·{" "}
+              <b className="font-bold text-body">Good</b> 60–69 ·{" "}
+              <b className="font-bold text-body">Fair</b> 50–59 ·{" "}
+              <b className="font-bold text-body">Poor</b> below 50. The legacy
+              threshold badges on each strategy read cash flow, cash-on-cash and
+              cap rate against fixed bars (Rare ≥ $400/mo · ≥12% · ≥8%), with a
+              dashed <b className="font-bold text-body">Almost</b> badge when a
+              tier is missed by less than $50/mo, 1.5 points of cash-on-cash or
+              1 point of cap rate. Breaking even is not a goal. Every figure is
+              an estimate from public data — HUD Fair Market Rents, FEMA flood
+              maps, the Census geocoder, Census county data (taxes, rents,
+              vacancy, population), BLS unemployment and the FRED mortgage
+              average — plus ATTOM property records and Mashvisor short-term
+              data where a key is configured. PropPencil estimates; it does not
+              pretend to know the future. Verify rents with local comparable
+              rentals, taxes with the county auditor and insurance with real
+              quotes before making an offer. Not professional advice.
             </p>
           </section>
         )}

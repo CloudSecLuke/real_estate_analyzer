@@ -29,6 +29,8 @@ export const DEFAULT_ASSUMPTIONS: Omit<Assumptions, "price" | "bedrooms"> = {
   maintenanceFloorMonthly: 110, // a 1920s roof costs the same on a $60k house
   appreciationPctAnnual: 3,
   sellingCostPct: 7, // agent commission + seller closing on exit
+  capexPctOfRent: 5, // monthly big-ticket reserve (roof, HVAC), % of rent
+  targetCocPct: 10, // required cash-on-cash; drives investor value + score
 };
 
 export function monthlyMortgagePayment(
@@ -143,8 +145,11 @@ export function computeScenario(
   );
   const management = grossMonthly * (a.managementPct / 100);
   const vacancy = grossMonthly * (vacancyPct / 100);
+  // CapEx reserve: roof/HVAC money set aside monthly, sized to the rent
+  const capex = grossMonthly * ((a.capexPctOfRent ?? 0) / 100);
   const other = a.otherMonthlyExpense;
-  const totalOpex = taxes + insurance + maintenance + management + vacancy + other;
+  const totalOpex =
+    taxes + insurance + maintenance + capex + management + vacancy + other;
 
   const noi = (grossMonthly - totalOpex) * 12;
 
@@ -190,6 +195,7 @@ export function computeScenario(
       taxes,
       insurance,
       maintenance,
+      capex,
       management,
       vacancy,
       other,

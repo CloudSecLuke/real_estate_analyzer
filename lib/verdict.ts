@@ -1,30 +1,30 @@
-import { monthlyMortgagePayment } from "./metrics";
 import type { ScenarioSet } from "./scenarios";
-import type { Assumptions, ScenarioResult } from "./types";
+import type { AnalyzeResponse, Assumptions, ScenarioResult } from "./types";
+import { dscrOf, type ScorePart } from "./pencilScore";
 
-// The verdict layer from the UI redesign: pure functions over a ScenarioSet
-// that produce the written recommendation, the ranked ladder and the band
+// The PropPencil verdict layer: the verdict sentence, "Why it pencils",
+// "What could break the pencil", the price recommendation and the band
 // commentary. Copy templates come from the design handoff verbatim —
-// including "once the mortgage is paid" rather than "after debt service".
+// including "once the mortgage is paid" phrasing and quantified details.
 
 export type ScenarioKey3 = "market" | "s8" | "str";
 
-export interface RankedScenario {
-  key: ScenarioKey3;
-  s: ScenarioResult;
-}
-
-// Display names for the redesign (the lib labels stay untouched)
 export const DISPLAY_LABEL: Record<ScenarioKey3, string> = {
-  market: "Market rent",
-  s8: "Section 8",
+  market: "Traditional rental",
+  s8: "Section 8 voucher",
   str: "Short-term rental",
 };
 
+export const TAB_LABEL: Record<ScenarioKey3, string> = {
+  market: "Traditional",
+  s8: "Section 8",
+  str: "Short-term",
+};
+
 export const MARKET_SRC_LABEL: Record<string, string> = {
-  override: "your own comp (override)",
-  "rent AVM": "ATTOM automated rent estimate (rent AVM)",
-  FMR: "HUD Fair Market Rent (FMR)",
+  override: "your own comp",
+  "rent AVM": "ATTOM automated rent estimate",
+  FMR: "HUD Fair Market Rent",
   "local ACS median": "county median rent (Census ACS)",
 };
 
@@ -36,6 +36,11 @@ export const signedUsd = (v: number): string =>
 
 export const pct1 = (v: number): string => v.toFixed(1) + "%";
 
+export interface RankedScenario {
+  key: ScenarioKey3;
+  s: ScenarioResult;
+}
+
 export function rankScenarios(set: ScenarioSet): RankedScenario[] {
   const list: RankedScenario[] = [];
   if (set.market) list.push({ key: "market", s: set.market });
@@ -44,192 +49,201 @@ export function rankScenarios(set: ScenarioSet): RankedScenario[] {
   return list.sort((a, b) => b.s.monthlyCashFlow - a.s.monthlyCashFlow);
 }
 
-export function gapText(s: ScenarioResult): string {
-  return s.ratingDetail.gaps
-    .map((g) =>
-      g.metric === "cash flow"
-        ? "$" + Math.ceil(g.needed) + "/mo of cash flow"
-        : g.needed.toFixed(1) + " points of " + (g.metric === "CoC" ? "cash-on-cash" : g.metric)
-    )
-    .join(" and ");
+export interface PencilVerdict {
+  line: string;
+  detail: string;
+  recommendation: string;
+  recommendationDetail: string;
+  gap: number; // ask − investor value; positive = overpriced vs target
 }
 
-export function ladderEyebrow(
-  ranked: RankedScenario[],
-  index: number
-): string {
-  const label = DISPLAY_LABEL[ranked[index].key].toLowerCase();
-  if (ranked.length === 1) return "Only scenario · " + label;
-  if (index === 0) return "Best case · " + label;
-  if (index === ranked.length - 1) return "Weakest · " + label;
-  return "Middle · " + label;
+export function buildPencilVerdict(args: {
+  score: number;
+  price: number;
+  investorValue: number;
+  active: RankedScenario | null;
+  count: number;
+  cashIn: number;
+  targetCoc: number;
+}): PencilVerdict {
+  const { score, price, investorValue, active, count, cashIn, targetCoc } = args;
+  const gap = price - investorValue;
+  if (!active) {
+    return {
+      line: "Nothing to pencil yet.",
+      detail: "",
+      recommendation: "",
+      recommendationDetail: "",
+      gap,
+    };
+  }
+  const label = DISPLAY_LABEL[active.key];
+  const line =
+    score >= 70
+      ? `At ${usdWhole(price)}, this property pencils.`
+      : score >= 50
+        ? `At ${usdWhole(price)}, this property barely pencils.`
+        : `At ${usdWhole(price)}, this property does not pencil.`;
+  const detail =
+    `${label} is the strongest of the ${count} strategies at ${signedUsd(active.s.monthlyCashFlow)} a month after the mortgage, ` +
+    `${pct1(active.s.cashOnCashPct)} cash-on-cash on ${usdWhole(cashIn)} of cash in. ` +
+    (gap > 0
+      ? `The ask is ${usdWhole(gap)} above what the income supports at your ${targetCoc}% target.`
+      : `The income supports ${usdWhole(-gap)} more than the ask at your ${targetCoc}% target.`);
+  const recommendation =
+    gap > 0
+      ? `Recommendation: negotiate to ${usdWhole(investorValue)} or walk away.`
+      : `Recommendation: the ask already works — move before someone else pencils it.`;
+  const recommendationDetail =
+    gap > 0
+      ? `Above ${usdWhole(investorValue)} the ${label.toLowerCase()} strategy no longer returns your required ${targetCoc}%. That is your walk-away price, not a target to stretch past.`
+      : `At ${usdWhole(price)} the ${label.toLowerCase()} strategy returns ${pct1(active.s.cashOnCashPct)} against the ${targetCoc}% you require, leaving ${usdWhole(-gap)} of headroom if you need to compete on price.`;
+  return { line, detail, recommendation, recommendationDetail, gap };
 }
 
-export interface StrMeta {
-  occupancyPct?: number;
-  revenue?: number; // monthly, occupancy-adjusted
+export interface WhyRiskItem {
+  title: string;
+  detail: string;
 }
 
 /** Dollars/month lost if occupancy drops ten points, net of STR management. */
-function tenPointCost(strMeta: StrMeta, a: Assumptions): number | null {
-  if (!strMeta.revenue || !strMeta.occupancyPct) return null;
-  return (
-    ((strMeta.revenue * 10) / strMeta.occupancyPct) *
-    (1 - (a.strManagementPct ?? 20) / 100)
-  );
+function tenPointCost(
+  revenue: number | undefined,
+  occupancyPct: number | undefined,
+  a: Assumptions
+): number | null {
+  if (!revenue || !occupancyPct) return null;
+  return ((revenue * 10) / occupancyPct) * (1 - (a.strManagementPct ?? 20) / 100);
+}
+
+export function whyAndRisks(args: {
+  data: AnalyzeResponse;
+  set: ScenarioSet;
+  active: RankedScenario;
+  a: Assumptions;
+  investorValue: number;
+  parts: ScorePart[];
+  targetCoc: number;
+  rentRange: { low: number; high: number } | null;
+}): { why: WhyRiskItem[]; risks: WhyRiskItem[] } {
+  const { data, set, active, a, investorValue, parts, targetCoc, rentRange } = args;
+  const s = active.s;
+  const why: WhyRiskItem[] = [];
+  const risks: WhyRiskItem[] = [];
+  const price = a.price;
+  const cashIn = s.cashInvested;
+  const gross = s.monthlyRent + a.otherMonthlyIncome;
+  const outflow = s.expenses.totalMonthly + s.monthlyPI;
+  const dscr = dscrOf(s);
+
+  if (investorValue > price)
+    why.push({
+      title: "Asking price is below your investor value",
+      detail: `At a required ${targetCoc}% return the deal supports ${usdWhole(investorValue)}, which is ${usdWhole(investorValue - price)} above the ${usdWhole(price)} ask.`,
+    });
+  if (s.monthlyCashFlow > 0)
+    why.push({
+      title: "Rent covers every expense plus the mortgage",
+      detail: `${usdWhole(gross)} in, ${usdWhole(outflow)} out, leaving ${signedUsd(s.monthlyCashFlow)} a month after reserves and empty months.`,
+    });
+  if (s.cashOnCashPct >= targetCoc)
+    why.push({
+      title: "Cash-on-cash beats your target",
+      detail: `${pct1(s.cashOnCashPct)} against the ${targetCoc}% you asked for, on ${usdWhole(cashIn)} of cash in.`,
+    });
+  if (Number.isFinite(dscr) && dscr >= 1.25)
+    why.push({
+      title: "Debt coverage clears the lender threshold",
+      detail: `${dscr.toFixed(2)}x — most lenders want 1.25x, so financing should not be the obstacle.`,
+    });
+  if (set.s8 && set.s8.monthlyCashFlow > 0 && active.key !== "s8")
+    why.push({
+      title: "A contract-backed fallback exists",
+      detail: `Section 8 pays ${signedUsd(set.s8.monthlyCashFlow)} a month on a voucher at ${a.vacancyPctSection8}% empty months, so there is a floor under the upside case.`,
+    });
+
+  const occ = data.mashvisor?.str?.occupancyPct;
+  if (active.key === "str") {
+    const dNet = tenPointCost(s.monthlyRent, occ, a);
+    if (dNet != null && occ != null) {
+      risks.push({
+        title: "Occupancy",
+        detail:
+          `The whole case rests on ${Math.round(occ)}% occupancy holding. Ten points off costs roughly ${usdWhole(dNet)} a month` +
+          (set.s8
+            ? `, which would put it ${s.monthlyCashFlow - dNet > set.s8.monthlyCashFlow ? "still ahead of" : "behind"} the voucher case.`
+            : "."),
+      });
+    }
+    risks.push({
+      title: "Regulation",
+      detail:
+        "Short-term rental rules can change with a single council vote. Confirm the local ordinance and any permit cap before you count on this number.",
+    });
+  }
+  if (active.key === "s8")
+    risks.push({
+      title: "Inspection and rent ceiling",
+      detail:
+        "The house must pass a housing-quality inspection, and the housing authority sets the ceiling — your rent is not yours to raise.",
+    });
+  risks.push({
+    title: "Insurance",
+    detail: `Budgeted at ${a.insurancePctOfValue}% of value (floor ${usdWhole(a.insuranceFloorMonthly ?? 0)}/mo), or ${usdWhole(s.expenses.insurance)} a month. A real quote coming back $60 higher takes the score down a tier.`,
+  });
+  if (set.marketRentSource !== "override") {
+    risks.push({
+      title: "Rent estimate",
+      detail:
+        `The rent is modelled, not leased. Source: ${(set.marketRentSource && MARKET_SRC_LABEL[set.marketRentSource]) || "none"}` +
+        (rentRange
+          ? `, range ${usdWhole(rentRange.low)}–${usdWhole(rentRange.high)}`
+          : "") +
+        `. One real comp from the block settles it.`,
+    });
+  }
+  const yearBuilt = data.mashvisor?.listing?.yearBuilt ?? data.attom?.yearBuilt;
+  if (yearBuilt != null && yearBuilt < 1960)
+    risks.push({
+      title: "Age and big-ticket repairs",
+      detail: `Built ${yearBuilt}. The ${a.capexPctOfRent}% CapEx reserve is ${usdWhole(s.expenses.capex)} a month — thin for a roof and an HVAC on a house this old.`,
+    });
+  const pop = data.marketHealth?.populationChangePct5yr;
+  if (pop != null && pop <= -1)
+    risks.push({
+      title: "Shrinking market",
+      detail: `${data.marketHealth?.countyName ?? "The county"} lost ${Math.abs(pop).toFixed(1)}% of its population over five years. Cheap cash flow in a melting market erodes through vacancy and flat rents.`,
+    });
+  if (data.flood.highRisk)
+    risks.push({
+      title: "Flood zone",
+      detail: `FEMA maps this location as high risk (Zone ${data.flood.zone}); the model already carries insurance +40%, and a real flood policy quote can be worse.`,
+    });
+  const pricePart = parts.find((p) => p.key === "price");
+  if (pricePart && pricePart.frac < 0.5)
+    risks.push({
+      title: "Purchase price",
+      detail: `At ${usdWhole(price)} the return falls short of your ${targetCoc}% target. ${investorValue > 0 ? usdWhole(investorValue) + " is where it works." : "No price in range reaches it with these rents."}`,
+    });
+
+  return { why: why.slice(0, 5), risks: risks.slice(0, 5) };
 }
 
 export function bandNote(
   key: ScenarioKey3,
   set: ScenarioSet,
   a: Assumptions,
-  strMeta: StrMeta
+  occupancyPct: number | undefined
 ): string {
   if (key === "str") {
-    const dNet = tenPointCost(strMeta, a);
-    const s = set.str!;
-    if (dNet != null && strMeta.occupancyPct != null) {
-      const s8Cf = set.s8 ? set.s8.monthlyCashFlow : 0;
-      return (
-        "Highest variance of the three. Ten points off " +
-        Math.round(strMeta.occupancyPct) +
-        "% occupancy costs about " +
-        usdWhole(dNet) +
-        " a month, which still leaves it " +
-        (s.monthlyCashFlow - dNet > s8Cf ? "ahead of" : "behind") +
-        " the voucher case."
-      );
-    }
-    return "Highest variance of the three: the revenue line moves with occupancy, and occupancy moves with the season.";
+    const dNet = tenPointCost(set.str?.monthlyRent, occupancyPct, a);
+    return dNet != null
+      ? `Highest return and highest variance. Ten points off occupancy costs about ${usdWhole(dNet)} a month.`
+      : "Highest return and highest variance: the revenue line moves with occupancy, and occupancy moves with the season.";
   }
-  if (key === "s8") {
-    return "The voucher portion arrives on contract, so the only empty months are between tenants. In exchange the house must pass a housing-quality inspection and accept the housing authority's rent ceiling.";
-  }
-  const s = set.market!;
-  if (s.ratingDetail.almost) {
-    return (
-      "Misses " +
-      s.ratingDetail.almost +
-      " by " +
-      gapText(s) +
-      ". A small rent bump or a lower price closes the gap entirely."
-    );
-  }
-  return "Rent is a modelled number, not a signed lease. One real comp from the block is worth more than either estimate.";
-}
-
-export interface Verdict {
-  headline: string;
-  p1: string;
-  p2: string;
-}
-
-export function buildVerdict(
-  set: ScenarioSet,
-  a: Assumptions,
-  strMeta: StrMeta
-): Verdict {
-  const ranked = rankScenarios(set);
-  const best = ranked[0];
-  const worst = ranked[ranked.length - 1];
-  if (!best) return { headline: "Nothing to underwrite yet.", p1: "", p2: "" };
-
-  if (best.s.monthlyCashFlow <= 0) {
-    const perTenK = monthlyMortgagePayment(
-      10000 * (1 - a.downPaymentPct / 100),
-      a.interestRatePct,
-      a.loanTermYears
-    );
-    return {
-      headline:
-        "At " + usdWhole(a.price) + ", none of these strategies clears break-even.",
-      p1:
-        "The best of the " +
-        ranked.length +
-        " scenarios is " +
-        DISPLAY_LABEL[best.key].toLowerCase() +
-        " at " +
-        signedUsd(best.s.monthlyCashFlow) +
-        " a month once the mortgage is paid. Breaking even is not the goal, so this one only works if the price comes down or the rent assumption is wrong.",
-      p2:
-        "Try the price that would make it work: every $10,000 off the purchase takes roughly " +
-        usdWhole(perTenK) +
-        " a month off the mortgage, before the smaller tax and reserve lines.",
-    };
-  }
-
-  const spread = best.s.monthlyCashFlow - worst.s.monthlyCashFlow;
-  const safe = set.s8 && best.key !== "s8" ? set.s8 : null;
-
-  let p2: string;
-  if (best.key === "str") {
-    const dNet = tenPointCost(strMeta, a);
-    p2 =
-      (dNet != null && strMeta.occupancyPct != null
-        ? "That number assumes " +
-          Math.round(strMeta.occupancyPct) +
-          "% occupancy holds; ten points off it costs about " +
-          usdWhole(dNet) +
-          " a month."
-        : "That number is only as good as the occupancy assumption behind it.") +
-      (safe
-        ? " Section 8 pays " +
-          signedUsd(safe.monthlyCashFlow) +
-          " off a contract-guaranteed voucher at " +
-          a.vacancyPctSection8 +
-          "% vacancy, so treat it as the floor beneath the upside case rather than a competing plan."
-        : "");
-  } else if (best.key === "s8") {
-    p2 =
-      "The voucher portion is contractual, so this is the rare case where the best number is also the steadiest one. The cost is an HQS inspection and a rent ceiling set by the housing authority." +
-      (set.str
-        ? " Short-term rental comes in at " +
-          signedUsd(set.str.monthlyCashFlow) +
-          " and carries the occupancy risk on top."
-        : "");
-  } else {
-    p2 =
-      "Market rent leading means the voucher ceiling and the short-term market are both soft here. Verify the rent with a real comp before acting on it — it is the one input with no contract behind it.";
-  }
-
-  const almostBand = ranked.find((r) => r.s.ratingDetail.almost);
-  const p1 =
-    DISPLAY_LABEL[best.key] +
-    " clears " +
-    signedUsd(best.s.monthlyCashFlow) +
-    " a month once the mortgage is paid — " +
-    (best.s.ratingDetail.almost
-      ? best.s.rating +
-        ", " +
-        usdWhole(best.s.ratingDetail.gaps[0]?.needed ?? 0) +
-        " of cash flow short of " +
-        best.s.ratingDetail.almost
-      : "rated " + best.s.rating) +
-    " — and " +
-    usdWhole(spread) +
-    " ahead of " +
-    DISPLAY_LABEL[worst.key].toLowerCase() +
-    ", the weakest of the " +
-    ranked.length +
-    " scenarios on the same purchase." +
-    (almostBand && almostBand.key !== best.key
-      ? " " +
-        DISPLAY_LABEL[almostBand.key] +
-        " sits at " +
-        signedUsd(almostBand.s.monthlyCashFlow) +
-        " and misses " +
-        almostBand.s.ratingDetail.almost +
-        " by " +
-        gapText(almostBand.s) +
-        " — a rounding error, not a margin."
-      : "");
-
-  const headline =
-    best.key === "str" && safe
-      ? "Run it short-term and it is the best deal on the list; run it on a voucher and it is the safest."
-      : DISPLAY_LABEL[best.key] + " is the strongest play on this house.";
-
-  return { headline, p1, p2 };
+  if (key === "s8")
+    return "The voucher portion arrives on contract, so the only empty months are between tenants. The trade is an inspection and the authority's rent ceiling.";
+  return "A modelled rent, not a signed lease. One comparable rental from the block is worth more than either estimate.";
 }
 
 export interface FidelityBenchmark {
