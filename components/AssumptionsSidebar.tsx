@@ -151,18 +151,6 @@ export default function AssumptionsSidebar({
         <p className="text-[12.5px] leading-[1.6] text-body">
           Three ways to run the same house, underwritten from one address.
         </p>
-        {user && (
-          <p className="text-[11.5px] text-label">
-            {user}
-            {!persistent && " (local only)"} ·{" "}
-            <button
-              onClick={onSignOut}
-              className="cursor-pointer border-b border-accent/30 text-accent hover:text-link-hover"
-            >
-              sign out
-            </button>
-          </p>
-        )}
       </div>
 
       <form

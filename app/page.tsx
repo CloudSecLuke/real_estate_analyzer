@@ -93,6 +93,50 @@ function AlmostChip({ almost }: { almost: Rating }) {
   );
 }
 
+const ACTION_BTN =
+  "cursor-pointer rounded-[2px] border border-input-border bg-field px-3 py-[6px] text-[12px] font-semibold text-accent hover:border-accent hover:text-link-hover";
+
+function AccountMenu({
+  user,
+  persistent,
+  onSignOut,
+}: {
+  user: string | null;
+  persistent: boolean;
+  onSignOut: () => void;
+}) {
+  if (!user) return null;
+  const initials = user
+    .split(".")
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("")
+    .slice(0, 2);
+  return (
+    <details className="relative">
+      <summary
+        title={user}
+        className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-full border border-input-border bg-field text-[11px] font-semibold text-ink hover:border-accent [&::-webkit-details-marker]:hidden"
+      >
+        {initials || "?"}
+      </summary>
+      <div className="absolute right-0 z-40 mt-1 flex w-48 flex-col gap-2 border border-rule bg-field p-3">
+        <div className="flex flex-col">
+          <span className="text-[12.5px] font-semibold text-ink">{user}</span>
+          <span className="text-[11px] text-label">
+            {persistent ? "synced to your account" : "saved on this device only"}
+          </span>
+        </div>
+        <button
+          onClick={onSignOut}
+          className="cursor-pointer rounded-[2px] border border-input-border bg-paper px-3 py-[6px] text-left text-[12px] font-semibold text-negative hover:border-negative"
+        >
+          Sign out
+        </button>
+      </div>
+    </details>
+  );
+}
+
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
     <span className="text-[10.5px] font-semibold uppercase tracking-[.16em] text-accent">
@@ -600,12 +644,15 @@ export default function Home() {
         <span className="font-serif text-[17px] font-medium">
           Rental Cash Flow Analyzer
         </span>
-        <button
-          onClick={() => setSidebarOpen((o) => !o)}
-          className="cursor-pointer rounded-[2px] border border-input-border bg-field px-3 py-[6px] text-[12px] font-semibold text-ink"
-        >
-          {sidebarOpen ? "Close" : "Inputs"}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setSidebarOpen((o) => !o)}
+            className="cursor-pointer rounded-[2px] border border-input-border bg-field px-3 py-[6px] text-[12px] font-semibold text-ink"
+          >
+            {sidebarOpen ? "Close" : "Inputs"}
+          </button>
+          <AccountMenu user={user} persistent={persistent} onSignOut={signOut} />
+        </div>
       </div>
       <div className={`${sidebarOpen ? "block" : "hidden"} lg:block`}>
         <AssumptionsSidebar
@@ -646,6 +693,10 @@ export default function Home() {
       </div>
 
       <main className="flex max-w-[1120px] flex-col gap-9 px-12 pb-[70px] pt-10 max-md:px-5">
+        {/* desktop account menu — the mobile top bar carries its own */}
+        <div className="-mb-7 flex justify-end max-lg:hidden">
+          <AccountMenu user={user} persistent={persistent} onSignOut={signOut} />
+        </div>
         {error && (
           <div className="border-l-[3px] border-negative bg-accent-tint py-[14px] pl-4">
             <span className="text-[13px] font-semibold text-warn-ink">
@@ -828,34 +879,33 @@ export default function Home() {
             <header className="flex flex-col gap-3 border-b-2 border-ink pb-[18px]">
               <div className="flex flex-wrap items-baseline justify-between gap-3">
                 <Eyebrow>Deal brief · {dealDate}</Eyebrow>
-                <div className="flex gap-4 text-[12px]">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={saveSearch}
-                    className={`cursor-pointer border-b ${
+                    className={`cursor-pointer rounded-[2px] px-3 py-[6px] text-[12px] font-semibold text-field ${
                       justSaved
-                        ? "border-transparent text-positive"
-                        : "border-accent/30 text-accent hover:text-link-hover"
+                        ? "bg-positive"
+                        : "bg-accent hover:bg-accent-hover"
                     }`}
                   >
                     {justSaved ? "Saved ✓" : "Save search"}
                   </button>
-                  <button
-                    onClick={() => window.print()}
-                    className="cursor-pointer border-b border-accent/30 text-accent hover:text-link-hover"
-                  >
+                  <button onClick={() => window.print()} className={ACTION_BTN}>
                     Export PDF
                   </button>
                   <button
                     onClick={() => {
                       navigator.clipboard?.writeText(window.location.href).catch(() => {});
                     }}
-                    className="cursor-pointer border-b border-accent/30 text-accent hover:text-link-hover"
+                    className={ACTION_BTN}
+                    title="Copies the app link — your partner signs in and loads the same saved search"
                   >
                     Share with partner
                   </button>
                   <button
                     onClick={startOver}
-                    className="cursor-pointer border-b border-accent/30 text-accent hover:text-link-hover"
+                    className={ACTION_BTN}
+                    title="Clear this analysis and return to the start screen (saved pins and searches are kept)"
                   >
                     Start over
                   </button>
