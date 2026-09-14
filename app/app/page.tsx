@@ -351,11 +351,38 @@ export default function Home() {
   const [paywall, setPaywall] = useState<"upgrade" | "quota" | null>(null);
   const [billingNote, setBillingNote] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [healthWarnings, setHealthWarnings] = useState<string[]>([]);
 
   const refreshBilling = () =>
     fetch("/api/billing/status")
       .then((r) => (r.ok ? r.json() : null))
-      .then((b) => b && setBilling(b))
+      .then((b) => {
+        if (!b) return;
+        setBilling(b);
+        // founders see operational warnings: sources down, keys expiring
+        if (b.plan === "founder") {
+          fetch("/api/health")
+            .then((r) => (r.ok ? r.json() : null))
+            .then((h) => {
+              if (!h) return;
+              const warns: string[] = [];
+              for (const r of h.results ?? []) {
+                if (r.configured && !r.ok) {
+                  warns.push(`${r.source} is failing: ${r.detail}`);
+                }
+              }
+              for (const k of h.keyDateWarnings ?? []) {
+                warns.push(
+                  k.daysAway >= 0
+                    ? `${k.label} in ${k.daysAway} day${k.daysAway === 1 ? "" : "s"} (${k.date})`
+                    : `${k.label} was ${-k.daysAway} day${k.daysAway === -1 ? "" : "s"} ago (${k.date})`
+                );
+              }
+              setHealthWarnings(warns);
+            })
+            .catch(() => {});
+        }
+      })
       .catch(() => {});
 
   useEffect(() => {
@@ -1012,6 +1039,19 @@ export default function Home() {
         {error && (
           <div className="rounded-[8px] border border-[#f0dba8] border-l-4 border-l-negative bg-accent-tint px-4 py-[14px]">
             <span className="text-[13px] font-bold text-warn-ink">{error}</span>
+          </div>
+        )}
+
+        {healthWarnings.length > 0 && (
+          <div className="flex flex-col gap-[6px] rounded-[8px] border border-[#f0dba8] border-l-4 border-l-warn bg-accent-tint px-4 py-[14px]">
+            <span className="text-[11px] font-bold uppercase tracking-[.1em] text-warn-ink">
+              Founder alert — data sources
+            </span>
+            {healthWarnings.map((w) => (
+              <span key={w} className="text-[13px] font-semibold text-warn-ink">
+                {w}
+              </span>
+            ))}
           </div>
         )}
 

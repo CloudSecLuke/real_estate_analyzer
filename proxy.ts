@@ -12,8 +12,9 @@ export async function proxy(request: NextRequest) {
     request.cookies.get(SESSION_COOKIE)?.value
   );
 
-  // Stripe calls this with its own signature auth — never gate it
-  if (pathname === "/api/billing/webhook") {
+  // Routes with their own auth: Stripe signs webhook calls; the health
+  // endpoint checks CRON_SECRET / founder session itself.
+  if (pathname === "/api/billing/webhook" || pathname === "/api/health") {
     return NextResponse.next();
   }
 
