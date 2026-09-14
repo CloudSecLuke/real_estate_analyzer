@@ -380,7 +380,7 @@ export default function AssumptionsSidebar({
       </div>
 
       {searches.length > 0 && (
-        <div className="flex flex-col gap-[6px] border-t border-border pt-[18px]">
+        <div className="flex flex-col gap-[6px] border-t border-border pt-[18px] lg:hidden">
           <MicroLabel>My Pencils</MicroLabel>
           {searches.map((s) => (
             <div
@@ -418,7 +418,7 @@ export default function AssumptionsSidebar({
       )}
 
       {history.length > 0 && (
-        <div className="flex flex-col gap-[6px] border-t border-border pt-[18px]">
+        <div className="flex flex-col gap-[6px] border-t border-border pt-[18px] lg:hidden">
           <MicroLabel>Recent addresses</MicroLabel>
           {history.slice(0, 5).map((h) => (
             <button

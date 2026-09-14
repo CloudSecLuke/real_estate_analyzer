@@ -783,8 +783,100 @@ export default function Home() {
         />
       </div>
 
-      <main className="flex max-w-[1180px] flex-col gap-[34px] px-10 pb-[70px] pt-[34px] max-md:px-5">
-        <div className="-mb-6 flex justify-end max-lg:hidden">
+      <main className="flex max-w-[1440px] flex-col gap-[34px] px-10 pb-[70px] pt-[34px] max-md:px-5">
+        <div className="-mb-4 flex items-center justify-end gap-2 max-lg:hidden">
+          <details className="relative">
+            <summary className={`${OUTLINE_BTN} flex list-none items-center gap-[6px] [&::-webkit-details-marker]:hidden`}>
+              My Pencils
+              {searches.length > 0 && (
+                <span className="rounded-full bg-pencil px-[7px] py-[1px] text-[10.5px] font-bold text-ink tabular-nums">
+                  {searches.length}
+                </span>
+              )}
+              <span className="text-[10px] text-label">▾</span>
+            </summary>
+            <div className="absolute right-0 z-40 mt-1 flex w-[320px] flex-col gap-1 rounded-[8px] border border-border bg-card p-2">
+              {searches.length === 0 && (
+                <p className="px-2 py-2 text-[12px] leading-[1.5] text-label">
+                  Nothing saved yet — pencil a property, then use{" "}
+                  <b className="font-semibold">Save to My Pencils</b> in the deal
+                  brief.
+                </p>
+              )}
+              {searches.map((sv) => (
+                <div
+                  key={sv.id}
+                  className="flex items-start justify-between gap-2 rounded-[5px] px-2 py-[6px] hover:bg-accent-tint"
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.currentTarget.closest("details")?.removeAttribute("open");
+                      loadSearch(sv);
+                    }}
+                    title="Pencil this property again with the saved price, bedrooms and assumptions"
+                    className="flex min-w-0 cursor-pointer flex-col items-start gap-[1px] text-left"
+                  >
+                    <span className="w-full truncate text-[12.5px] font-semibold text-ink">
+                      {sv.name}
+                    </span>
+                    <span className="text-[11px] text-label tabular-nums">
+                      ${sv.price.toLocaleString("en-US")} · {sv.bedrooms} bed ·{" "}
+                      {new Date(sv.savedAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSearches((prev) => prev.filter((x) => x.id !== sv.id))
+                    }
+                    title="Remove from My Pencils"
+                    className="cursor-pointer px-1 text-[12px] text-label hover:text-negative"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </details>
+          <details className="relative">
+            <summary className={`${OUTLINE_BTN} flex list-none items-center gap-[6px] [&::-webkit-details-marker]:hidden`}>
+              Recent
+              <span className="text-[10px] text-label">▾</span>
+            </summary>
+            <div className="absolute right-0 z-40 mt-1 flex w-[320px] flex-col gap-1 rounded-[8px] border border-border bg-card p-2">
+              {history.length === 0 && (
+                <p className="px-2 py-2 text-[12px] leading-[1.5] text-label">
+                  No addresses penciled yet.
+                </p>
+              )}
+              {history.slice(0, 8).map((h) => (
+                <button
+                  key={h.address}
+                  type="button"
+                  onClick={(e) => {
+                    e.currentTarget.closest("details")?.removeAttribute("open");
+                    setAddress(h.address);
+                    setPrice(h.price);
+                    setBedrooms(h.bedrooms);
+                    analyze(h.address, { keepInputs: true });
+                  }}
+                  title="Pencil this address again"
+                  className="flex cursor-pointer flex-col items-start gap-[1px] rounded-[5px] px-2 py-[6px] text-left hover:bg-accent-tint"
+                >
+                  <span className="w-full truncate text-[12.5px] font-medium text-ink">
+                    {h.address}
+                  </span>
+                  <span className="text-[11px] text-label tabular-nums">
+                    ${h.price.toLocaleString("en-US")} · {h.bedrooms} bed
+                  </span>
+                </button>
+              ))}
+            </div>
+          </details>
           <AccountMenu user={user} persistent={persistent} onSignOut={signOut} />
         </div>
 
