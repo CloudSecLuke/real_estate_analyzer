@@ -736,8 +736,14 @@ export default function Landing() {
             </div>
           </div>
         </div>
-        <div className="mx-auto w-full max-w-[1180px] px-8 pb-8 max-md:px-5">
+        <div className="mx-auto flex w-full max-w-[1180px] flex-wrap gap-5 px-8 pb-8 max-md:px-5">
           <span className="text-[12px] text-disabled">© 2026 PropPencil</span>
+          <Link href="/terms" className="text-[12px] text-disabled hover:text-on-dark">
+            Terms of Service
+          </Link>
+          <Link href="/privacy" className="text-[12px] text-disabled hover:text-on-dark">
+            Privacy Policy
+          </Link>
         </div>
       </footer>
     </div>

@@ -161,6 +161,17 @@ export default function SignupPage() {
             >
               {loading ? "Creating account…" : "Create account & pencil free"}
             </button>
+            <p className="text-center text-[12px] leading-[1.6] text-label">
+              By creating an account you agree to the{" "}
+              <Link href="/terms" className="font-semibold text-accent hover:text-link-hover">
+                Terms of Service
+              </Link>{" "}
+              and{" "}
+              <Link href="/privacy" className="font-semibold text-accent hover:text-link-hover">
+                Privacy Policy
+              </Link>
+              .
+            </p>
           </form>
 
           <p className="text-center text-[13px] leading-[1.6] text-label">

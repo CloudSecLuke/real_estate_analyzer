@@ -29,6 +29,8 @@ export async function proxy(request: NextRequest) {
     pathname === "/" ||
     pathname === "/login" ||
     pathname === "/signup" ||
+    pathname === "/terms" ||
+    pathname === "/privacy" ||
     pathname === "/api/auth/login" ||
     pathname === "/api/auth/signup"
   ) {
