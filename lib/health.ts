@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { databaseUrl } from "./dbUrl";
 import { geocodeAddress } from "./geocode";
 import { getFmr } from "./hud";
 import { getCountyMedianRent } from "./acs";
@@ -143,7 +144,7 @@ let _sql: Sql | null = null;
 let _ready: Promise<void> | null = null;
 
 function getSql(): Sql {
-  if (!_sql) _sql = neon(process.env.DATABASE_URL!);
+  if (!_sql) _sql = neon(databaseUrl());
   return _sql;
 }
 

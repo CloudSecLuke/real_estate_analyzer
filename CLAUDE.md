@@ -28,5 +28,7 @@ from the GitHub issue number). Labels: priority `P0`/`P1`/`P2` plus area
   env-hash founder accounts (`luke.miller`, `bart.miller`) with unlimited
   pencils. Everyone else: 1 free pencil, then the $19/mo Investor plan
   (100/mo) via Stripe Checkout.
-- Never point local scripts at the production `DATABASE_URL` casually —
-  see PROP-5 (dev/prod DB separation) until it's resolved.
+- Local dev uses the isolated `proppencil_dev` database (same Neon
+  host). After any `vercel env pull`, run `npm run env:dev` to repoint
+  `.env.local`. `lib/dbUrl.ts` hard-refuses the production `neondb`
+  outside production unless `ALLOW_PROD_DB=1` is set deliberately.

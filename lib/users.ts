@@ -1,5 +1,6 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
+import { databaseUrl } from "./dbUrl";
 
 // Self-serve accounts + entitlements. The two founder accounts
 // (luke.miller / bart.miller) stay in env vars with unlimited use;
@@ -22,7 +23,7 @@ export function isUsersDbConfigured(): boolean {
 }
 
 function getSql(): Sql {
-  if (!_sql) _sql = neon(process.env.DATABASE_URL!);
+  if (!_sql) _sql = neon(databaseUrl());
   return _sql;
 }
 

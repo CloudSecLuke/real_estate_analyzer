@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { databaseUrl } from "./dbUrl";
 import type { Assumptions, HistoryEntry, SavedPin, SavedSearch } from "./types";
 
 // Neon Postgres (Vercel Marketplace). Lazy init so `next build` and
@@ -14,7 +15,7 @@ let _sql: Sql | null = null;
 let _schemaReady: Promise<void> | null = null;
 
 function getSql(): Sql {
-  if (!_sql) _sql = neon(process.env.DATABASE_URL!);
+  if (!_sql) _sql = neon(databaseUrl());
   return _sql;
 }
 

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
+import { databaseUrl } from "./dbUrl";
 import type { NextRequest } from "next/server";
 
 // Fixed-window rate limiting backed by Postgres (PROP-2). One atomic
@@ -17,7 +18,7 @@ let _sql: Sql | null = null;
 let _ready: Promise<void> | null = null;
 
 function getSql(): Sql {
-  if (!_sql) _sql = neon(process.env.DATABASE_URL!);
+  if (!_sql) _sql = neon(databaseUrl());
   return _sql;
 }
 

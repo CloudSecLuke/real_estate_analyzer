@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run"
+    "test": "vitest run",
+    "env:dev": "node scripts/use-dev-db.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
