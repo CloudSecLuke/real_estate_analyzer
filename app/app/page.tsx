@@ -350,38 +350,11 @@ export default function Home() {
   const [paywall, setPaywall] = useState<"upgrade" | "quota" | null>(null);
   const [billingNote, setBillingNote] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
-  const [healthWarnings, setHealthWarnings] = useState<string[]>([]);
 
   const refreshBilling = () =>
     fetch("/api/billing/status")
       .then((r) => (r.ok ? r.json() : null))
-      .then((b) => {
-        if (!b) return;
-        setBilling(b);
-        // founders see operational warnings: sources down, keys expiring
-        if (b.plan === "founder") {
-          fetch("/api/health")
-            .then((r) => (r.ok ? r.json() : null))
-            .then((h) => {
-              if (!h) return;
-              const warns: string[] = [];
-              for (const r of h.results ?? []) {
-                if (r.configured && !r.ok) {
-                  warns.push(`${r.source} is failing: ${r.detail}`);
-                }
-              }
-              for (const k of h.keyDateWarnings ?? []) {
-                warns.push(
-                  k.daysAway >= 0
-                    ? `${k.label} in ${k.daysAway} day${k.daysAway === 1 ? "" : "s"} (${k.date})`
-                    : `${k.label} was ${-k.daysAway} day${k.daysAway === -1 ? "" : "s"} ago (${k.date})`
-                );
-              }
-              setHealthWarnings(warns);
-            })
-            .catch(() => {});
-        }
-      })
+      .then((b) => b && setBilling(b))
       .catch(() => {});
 
   useEffect(() => {
@@ -1034,19 +1007,6 @@ export default function Home() {
           </div>
         )}
 
-        {healthWarnings.length > 0 && (
-          <div className="flex flex-col gap-[6px] rounded-[8px] border border-[#f0dba8] border-l-4 border-l-warn bg-accent-tint px-4 py-[14px]">
-            <span className="text-[11px] font-bold uppercase tracking-[.1em] text-warn-ink">
-              Founder alert — data sources
-            </span>
-            {healthWarnings.map((w) => (
-              <span key={w} className="text-[13px] font-semibold text-warn-ink">
-                {w}
-              </span>
-            ))}
-          </div>
-        )}
-
         {billingNote && (
           <div className="flex items-start justify-between gap-3 rounded-[8px] border border-border border-l-4 border-l-pencil bg-card px-4 py-[14px]">
             <span className="text-[13px] font-semibold text-ink">
@@ -1296,9 +1256,8 @@ export default function Home() {
                   </span>
                   <p className="m-0 max-w-[78ch] text-[13px] leading-[1.6] text-warn-ink">
                     {data.attom?.rentalAvm != null
-                      ? "Section 8 rent is the Fair Market Rent times your payment standard, so that strategy stays dark until a free token from huduser.gov is in place. The traditional rental is unaffected — it falls back to ATTOM's rent estimate."
-                      : "Section 8 needs HUD, and with no ATTOM key either there is no rent baseline at all. Register a free token at huduser.gov, or enter a comp under Market rent override."}
-                    {data.fmrError && <span className="text-[12px]"> ({data.fmrError})</span>}
+                      ? "Fair Market Rent data wasn't available for this area, so the voucher strategy is skipped. The traditional rental is unaffected — it uses the property's rent estimate."
+                      : "Fair Market Rent data wasn't available for this area, and no rent estimate came back either. Enter a local comp under Market rent override to pencil this one."}
                   </p>
                 </div>
               </div>
@@ -1308,17 +1267,13 @@ export default function Home() {
               <div className="flex gap-[13px] rounded-[8px] border border-[#e0dacd] border-l-4 border-l-label bg-[#f4f2ec] px-4 py-[14px]">
                 <div className="flex flex-col gap-1">
                   <span className="text-[13px] font-bold text-body">
-                    {data.mashvisorError
-                      ? "Mashvisor unavailable — the short-term strategy is skipped."
-                      : "No Mashvisor key — the short-term strategy is skipped."}
+                    Short-term rental data wasn&apos;t available — that
+                    strategy is skipped.
                   </span>
                   <p className="m-0 max-w-[78ch] text-[13px] leading-[1.6] text-body">
-                    Occupancy and nightly rate come from Mashvisor, so there is
-                    no honest short-term number to pencil. The long-term
-                    strategies below are unaffected.
-                    {data.mashvisorError && (
-                      <span className="text-[12px]"> ({data.mashvisorError})</span>
-                    )}
+                    Without occupancy and nightly-rate data there is no honest
+                    short-term number to pencil. The long-term strategies
+                    below are unaffected.
                   </p>
                 </div>
               </div>
@@ -1328,14 +1283,13 @@ export default function Home() {
               <div className="flex gap-[13px] rounded-[8px] border border-[#e0dacd] border-l-4 border-l-label bg-[#f4f2ec] px-4 py-[14px]">
                 <div className="flex flex-col gap-1">
                   <span className="text-[13px] font-bold text-body">
-                    ATTOM unavailable — property record, tax bill and rent
-                    estimate fall back to free sources.
+                    This parcel&apos;s detailed records weren&apos;t
+                    available — estimates use county-level data.
                   </span>
                   <p className="m-0 max-w-[78ch] text-[13px] leading-[1.6] text-body">
                     The tax line uses the county median instead of this
-                    parcel&apos;s actual bill, and the market rent leans on HUD
-                    and Census data.{" "}
-                    <span className="text-[12px]">({data.attomError})</span>
+                    parcel&apos;s actual bill, and market rent leans on
+                    public rent data. The confidence rows below reflect this.
                   </p>
                 </div>
               </div>

@@ -73,11 +73,11 @@ export async function POST(req: NextRequest) {
     const city = addrParts[1] ?? "";
 
     let fmr: FmrData | null = null;
-    let fmrError: string | undefined;
+    let fmrError: boolean | undefined;
     let attom: AttomData | null = null;
-    let attomError: string | undefined;
+    let attomError: boolean | undefined;
     let mashvisor: MashvisorData | null = null;
-    let mashvisorError: string | undefined;
+    let mashvisorError: boolean | undefined;
     const [fmrResult, flood, attomResult, acsRent, tax, mashvisorResult, marketHealth] = await Promise.all([
       getFmr(property.countyFips, property.zip).catch((e: Error) => e),
       getFloodZone(property.lat, property.lon),
@@ -102,18 +102,24 @@ export async function POST(req: NextRequest) {
         () => null
       ),
     ]);
+    // Provider failure details stay in server logs (and the founder
+    // /api/health checks); the client only learns that a source was
+    // unavailable, never why.
     if (fmrResult instanceof Error) {
-      fmrError = fmrResult.message;
+      console.error("analyze_source_failed", "hud", fmrResult.message);
+      fmrError = true;
     } else {
       fmr = fmrResult;
     }
     if (attomResult instanceof Error) {
-      attomError = attomResult.message;
+      console.error("analyze_source_failed", "attom", attomResult.message);
+      attomError = true;
     } else {
       attom = attomResult;
     }
     if (mashvisorResult instanceof Error) {
-      mashvisorError = mashvisorResult.message;
+      console.error("analyze_source_failed", "mashvisor", mashvisorResult.message);
+      mashvisorError = true;
     } else {
       mashvisor = mashvisorResult;
     }

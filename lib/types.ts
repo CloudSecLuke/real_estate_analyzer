@@ -103,15 +103,15 @@ export interface MarketHealth {
 export interface AnalyzeResponse {
   property: GeocodeResult;
   fmr: FmrData | null;
-  fmrError?: string;
+  fmrError?: boolean;
   flood: FloodData;
   tax: TaxEstimate;
   acsRent?: AcsRentData | null;
   marketHealth?: MarketHealth | null;
   attom?: AttomData | null;
-  attomError?: string;
+  attomError?: boolean;
   mashvisor?: MashvisorData | null;
-  mashvisorError?: string;
+  mashvisorError?: boolean;
 }
 
 export interface Assumptions {
