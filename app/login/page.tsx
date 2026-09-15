@@ -3,66 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AppMarkInverted } from "@/components/PencilMark";
-import { tierForLegacyRating, tierForScore } from "@/lib/pencilScore";
-import type { HistoryEntry, PinMetrics, SavedPin } from "@/lib/types";
-
-const signed = (n: number) =>
-  (n >= 0 ? "+" : "−") + "$" + Math.abs(Math.round(n)).toLocaleString("en-US");
-const usd = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
-
-interface LastPenciled {
-  address: string;
-  score: number | null;
-  tierLabel: string;
-  tierBg: string;
-  tierFg: string;
-  cashFlow: number;
-  maxBuy: number | null;
-  coc: number;
-}
-
-// The "Last penciled" card is populated from this browser's most recent
-// analysis (localStorage), and hidden entirely for a first-time visitor —
-// never placeholder numbers.
-function readLastPenciled(): LastPenciled | null {
-  try {
-    const hist: HistoryEntry[] = JSON.parse(
-      localStorage.getItem("rea_history_v1") ?? "[]"
-    );
-    const pins: SavedPin[] = JSON.parse(
-      localStorage.getItem("rea_saved_pins_v1") ?? "[]"
-    );
-    const last = hist[0];
-    if (!last) return null;
-    const pin = pins.find(
-      (p) => p.address.toLowerCase() === last.address.toLowerCase()
-    );
-    if (!pin) return null;
-    const metrics = [pin.market, pin.s8, pin.str].filter(
-      (m): m is PinMetrics => Boolean(m)
-    );
-    if (metrics.length === 0) return null;
-    const best = metrics.reduce((a, b) =>
-      b.monthlyCashFlow > a.monthlyCashFlow ? b : a
-    );
-    const tier =
-      best.score != null
-        ? tierForScore(best.score)
-        : tierForLegacyRating(best.rating);
-    return {
-      address: pin.address,
-      score: best.score ?? null,
-      tierLabel: tier.label,
-      tierBg: tier.bg,
-      tierFg: tier.fg,
-      cashFlow: best.monthlyCashFlow,
-      maxBuy: pin.investorValue ?? null,
-      coc: best.cashOnCashPct,
-    };
-  } catch {
-    return null;
-  }
-}
 
 const INPUT =
   "w-full rounded-[7px] border border-input-border bg-card px-[13px] py-3 text-[14.5px] text-ink outline-none focus:border-ink focus:shadow-[0_0_0_3px_rgba(244,197,66,.45)]";
@@ -74,11 +14,9 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [last, setLast] = useState<LastPenciled | null>(null);
   const [nextUrl, setNextUrl] = useState("/app");
 
   useEffect(() => {
-    setLast(readLastPenciled());
     const params = new URLSearchParams(window.location.search);
     const next = params.get("next");
     if (next && next.startsWith("/")) setNextUrl(next);
@@ -136,61 +74,55 @@ export default function LoginPage() {
             your assumptions, and the return you require.
           </p>
 
-          {last && (
-            <div className="mt-[6px] flex flex-col gap-px overflow-hidden rounded-[10px] border border-[#2e2e2b] bg-[#2e2e2b]">
-              <div className="flex items-center justify-between gap-4 bg-[#1f1f1d] px-[18px] py-4">
-                <div className="flex min-w-0 flex-col gap-[2px]">
-                  <span className="text-[10.5px] font-bold uppercase tracking-[.12em] text-disabled">
-                    Last penciled
-                  </span>
-                  <span className="truncate text-[14px] font-semibold text-on-dark">
-                    {last.address}
-                  </span>
-                </div>
-                <div className="flex shrink-0 items-center gap-[9px]">
-                  {last.score != null && (
-                    <span className="text-[26px] font-extrabold tracking-[-.035em] text-on-dark tabular-nums">
-                      {last.score}
-                    </span>
-                  )}
-                  <span
-                    className="whitespace-nowrap rounded-[5px] px-[9px] py-[3px] text-[10px] font-bold uppercase tracking-[.05em]"
-                    style={{ backgroundColor: last.tierBg, color: last.tierFg }}
-                  >
-                    {last.tierLabel}
-                  </span>
-                </div>
+          {/* Illustrative only — a fictional address so no real property
+              ever appears on a public page (real numbers from the sample
+              deal shape, address invented). */}
+          <div className="mt-[6px] flex flex-col gap-px overflow-hidden rounded-[10px] border border-[#2e2e2b] bg-[#2e2e2b]">
+            <div className="flex items-center justify-between gap-4 bg-[#1f1f1d] px-[18px] py-4">
+              <div className="flex min-w-0 flex-col gap-[2px]">
+                <span className="text-[10.5px] font-bold uppercase tracking-[.12em] text-disabled">
+                  Sample pencil
+                </span>
+                <span className="truncate text-[14px] font-semibold text-on-dark">
+                  100 Pencil Ln, Cincinnati, OH
+                </span>
               </div>
-              <div className="flex flex-wrap gap-5 bg-[#1f1f1d] px-[18px] py-[14px]">
-                <div className="flex flex-col gap-[2px]">
-                  <span className="text-[10px] font-bold uppercase tracking-[.1em] text-disabled">
-                    Cash flow
-                  </span>
-                  <span className="text-[15px] font-bold text-[#7ddba8] tabular-nums">
-                    {signed(last.cashFlow)}/mo
-                  </span>
-                </div>
-                {last.maxBuy != null && (
-                  <div className="flex flex-col gap-[2px]">
-                    <span className="text-[10px] font-bold uppercase tracking-[.1em] text-disabled">
-                      Max buy price
-                    </span>
-                    <span className="text-[15px] font-bold text-pencil tabular-nums">
-                      {usd(last.maxBuy)}
-                    </span>
-                  </div>
-                )}
-                <div className="flex flex-col gap-[2px]">
-                  <span className="text-[10px] font-bold uppercase tracking-[.1em] text-disabled">
-                    Cash-on-cash
-                  </span>
-                  <span className="text-[15px] font-bold text-on-dark tabular-nums">
-                    {last.coc.toFixed(1)}%
-                  </span>
-                </div>
+              <div className="flex shrink-0 items-center gap-[9px]">
+                <span className="text-[26px] font-extrabold tracking-[-.035em] text-on-dark tabular-nums">
+                  83
+                </span>
+                <span className="whitespace-nowrap rounded-[5px] bg-[#0f6b44] px-[9px] py-[3px] text-[10px] font-bold uppercase tracking-[.05em] text-white">
+                  Fantastic Pencil
+                </span>
               </div>
             </div>
-          )}
+            <div className="flex flex-wrap gap-5 bg-[#1f1f1d] px-[18px] py-[14px]">
+              <div className="flex flex-col gap-[2px]">
+                <span className="text-[10px] font-bold uppercase tracking-[.1em] text-disabled">
+                  Cash flow
+                </span>
+                <span className="text-[15px] font-bold text-[#7ddba8] tabular-nums">
+                  +$557/mo
+                </span>
+              </div>
+              <div className="flex flex-col gap-[2px]">
+                <span className="text-[10px] font-bold uppercase tracking-[.1em] text-disabled">
+                  Max buy price
+                </span>
+                <span className="text-[15px] font-bold text-pencil tabular-nums">
+                  $156,500
+                </span>
+              </div>
+              <div className="flex flex-col gap-[2px]">
+                <span className="text-[10px] font-bold uppercase tracking-[.1em] text-disabled">
+                  Cash-on-cash
+                </span>
+                <span className="text-[15px] font-bold text-on-dark tabular-nums">
+                  24.6%
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <p className="max-w-[60ch] text-[12px] leading-[1.65] text-disabled">
