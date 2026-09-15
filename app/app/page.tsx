@@ -67,7 +67,6 @@ const HISTORY_KEY = "rea_history_v1";
 const SEARCHES_KEY = "rea_searches_v1";
 const HISTORY_MAX = 20;
 const SEARCHES_MAX = 30;
-const SAMPLE = { address: "1418 Vine St, Cincinnati, OH 45202", price: 118000, beds: 3 };
 
 type Phase = "empty" | "loading" | "results";
 type Strategy = "auto" | ScenarioKey3;
@@ -642,13 +641,6 @@ export default function Home() {
     }
   }
 
-  function useSample() {
-    setAddress(SAMPLE.address);
-    setPrice(SAMPLE.price);
-    setBedrooms(SAMPLE.beds);
-    analyze(SAMPLE.address);
-  }
-
   function startOver() {
     setData(null);
     setError(null);
@@ -1145,14 +1137,14 @@ export default function Home() {
                 actually works.
               </p>
               <div className="mt-1 flex flex-wrap items-center gap-3">
-                <button
-                  onClick={useSample}
+                <a
+                  href="/#score"
                   className="cursor-pointer rounded-[8px] bg-ink px-[22px] py-[13px] text-[14px] font-bold text-on-dark hover:bg-[#333]"
                 >
-                  Pencil an example property
-                </button>
+                  See a sample analysis
+                </a>
                 <span className="text-[13px] text-label">
-                  1418 Vine St, Cincinnati — $118,000, 3 bed
+                  or enter any address in the sidebar to pencil it
                 </span>
               </div>
             </div>
@@ -1217,7 +1209,7 @@ export default function Home() {
             <div className="flex flex-col gap-[10px] border-b border-ink pb-[18px]">
               <Eyebrow>Penciling the deal</Eyebrow>
               <h2 className="text-[30px] font-extrabold leading-[1.15] tracking-[-.03em] max-md:text-[24px]">
-                {address || SAMPLE.address}
+                {address}
               </h2>
             </div>
             <div className="flex max-w-[580px] flex-col">

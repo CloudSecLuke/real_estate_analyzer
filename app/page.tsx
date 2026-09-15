@@ -4,10 +4,12 @@ import AddressCta from "@/components/marketing/AddressCta";
 
 // The PropPencil marketing landing page. Static server component — the
 // only client JS is the two <AddressCta /> forms. Every figure below is
-// the app's real output for the sample property (1418 Vine St at
-// $118,000, 10% required return): score 83 Fantastic Pencil, +$557/mo
-// short-term, $156,500 investor value, $38,500 headroom. Regenerate from
-// the app if the sample ever changes; never edit by hand.
+// the app's real output for a sample run ($118,000 ask, 3 bed, 10%
+// required return): score 83 Fantastic Pencil, +$557/mo short-term,
+// $156,500 investor value, $38,500 headroom. The displayed address is
+// FICTIONAL by policy — no real addresses on public pages (owner
+// liability). Regenerate figures from the app if the sample ever
+// changes; never edit by hand.
 
 const NAV_LINKS = [
   ["#how", "How it works"],
@@ -228,7 +230,7 @@ export default function Landing() {
             <div className="flex flex-col gap-[14px] bg-card px-6 py-[22px]">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-[10.5px] font-bold uppercase tracking-[.14em] text-label">
-                  1418 Vine St, Cincinnati
+                  100 Pencil Ln, Cincinnati
                 </span>
                 <span className="text-[11.5px] font-semibold text-label tabular-nums">
                   $118,000 ask
