@@ -579,14 +579,15 @@ export default function Landing() {
             <div className="flex max-w-[62ch] flex-col gap-3">
               <Eyebrow>Pricing</Eyebrow>
               <h2 className="text-[40px] font-extrabold leading-[1.08] tracking-[-.035em] [text-wrap:pretty] max-md:text-[30px]">
-                Try one on us. Then it&apos;s $19 a month.
+                Would you pay $19 to avoid a $250,000 mistake?
               </h2>
               <p className="max-w-[58ch] text-[17px] leading-[1.6] text-body [text-wrap:pretty]">
-                Every pencil pulls live data — HUD rents, county taxes,
-                comparable sales, short-term rental demand. Those lookups cost
-                real money, so the pricing is simple: your first full analysis
-                is free, and the Investor plan covers a serious month of deal
-                hunting for less than one home inspection.
+                That&apos;s the whole pitch. Your first full analysis is
+                free, and the Investor plan covers a serious month of deal
+                hunting for less than one home inspection. Every pencil pulls
+                live data — HUD rents, county taxes, comparable sales,
+                short-term rental demand — so you see the deal&apos;s real
+                shape before you sign for it.
               </p>
             </div>
             <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-[14px] lg:max-w-[760px]">
