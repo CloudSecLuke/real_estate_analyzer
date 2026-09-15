@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { neon } from "@neondatabase/serverless";
 import { databaseUrl } from "./dbUrl";
 
@@ -50,6 +50,14 @@ function ensureSchema(): Promise<void> {
           stripe_customer_id  text,
           stripe_subscription_id text,
           updated_at          timestamptz NOT NULL DEFAULT now()
+        )
+      `;
+      await sql`
+        CREATE TABLE IF NOT EXISTS password_resets (
+          token_hash text PRIMARY KEY,
+          username   text NOT NULL,
+          expires_at timestamptz NOT NULL,
+          used_at    timestamptz
         )
       `;
     })();
@@ -108,6 +116,70 @@ export async function createUser(
     ON CONFLICT (username) DO NOTHING
   `;
   return { ok: true };
+}
+
+// --- password reset (PROP-4) ----------------------------------------------
+// Tokens are 32 random bytes; only a sha256 hash is stored, single-use,
+// 30-minute expiry. Founder accounts live in env vars and cannot be
+// reset here — callers respond identically either way so the endpoint
+// never reveals which usernames exist.
+
+const RESET_TTL_MIN = 30;
+
+function sha256hex(s: string): string {
+  return createHash("sha256").update(s).digest("hex");
+}
+
+/** Returns the raw token to email, or null when no reset is possible
+ *  (unknown user, founder, or no email on file). */
+export async function createResetToken(
+  username: string
+): Promise<{ token: string; email: string } | null> {
+  const u = username.trim().toLowerCase();
+  if (!isUsersDbConfigured() || isFounder(u)) return null;
+  await ensureSchema();
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT email FROM users WHERE username = ${u}
+  `) as { email: string | null }[];
+  const email = rows[0]?.email;
+  if (!email) return null;
+  const token = randomBytes(32).toString("hex");
+  await sql`
+    INSERT INTO password_resets (token_hash, username, expires_at)
+    VALUES (${sha256hex(token)}, ${u}, now() + make_interval(mins => ${RESET_TTL_MIN}))
+  `;
+  return { token, email };
+}
+
+/** Consumes a valid token and sets the new password. */
+export async function resetPassword(
+  token: string,
+  newPassword: string
+): Promise<{ ok: true; username: string } | { ok: false; error: string }> {
+  if (newPassword.length < 8) {
+    return { ok: false, error: "Password must be at least 8 characters." };
+  }
+  if (!isUsersDbConfigured() || !/^[0-9a-f]{64}$/.test(token)) {
+    return { ok: false, error: "That reset link is invalid or has expired." };
+  }
+  await ensureSchema();
+  const sql = getSql();
+  const rows = (await sql`
+    UPDATE password_resets SET used_at = now()
+    WHERE token_hash = ${sha256hex(token)}
+      AND used_at IS NULL AND expires_at > now()
+    RETURNING username
+  `) as { username: string }[];
+  const username = rows[0]?.username;
+  if (!username) {
+    return { ok: false, error: "That reset link is invalid or has expired." };
+  }
+  await sql`
+    UPDATE users SET password_hash = ${hashPassword(newPassword)}
+    WHERE username = ${username}
+  `;
+  return { ok: true, username };
 }
 
 export async function verifyDbUser(

@@ -19,7 +19,13 @@ export async function proxy(request: NextRequest) {
   }
 
   if (user) {
-    if (pathname === "/login" || pathname === "/signup" || pathname === "/") {
+    if (
+      pathname === "/login" ||
+      pathname === "/signup" ||
+      pathname === "/forgot" ||
+      pathname === "/reset" ||
+      pathname === "/"
+    ) {
       return NextResponse.redirect(new URL("/app", request.url));
     }
     return NextResponse.next();
@@ -31,8 +37,12 @@ export async function proxy(request: NextRequest) {
     pathname === "/signup" ||
     pathname === "/terms" ||
     pathname === "/privacy" ||
+    pathname === "/forgot" ||
+    pathname === "/reset" ||
     pathname === "/api/auth/login" ||
-    pathname === "/api/auth/signup"
+    pathname === "/api/auth/signup" ||
+    pathname === "/api/auth/forgot" ||
+    pathname === "/api/auth/reset"
   ) {
     return NextResponse.next();
   }

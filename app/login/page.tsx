@@ -274,12 +274,12 @@ export default function LoginPage() {
                 />
                 <span>Keep me signed in</span>
               </label>
-              <a
-                href="mailto:luke.f.miller.8@gmail.com?subject=PropPencil%20password%20reset"
+              <Link
+                href="/forgot"
                 className="text-[13px] font-semibold text-accent hover:text-link-hover"
               >
                 Forgot password?
-              </a>
+              </Link>
             </div>
 
             <button

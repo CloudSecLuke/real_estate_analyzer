@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 import { isFounder } from "@/lib/users";
+import { isEmailConfigured, sendEmail } from "@/lib/email";
 import {
   latestHealthResults,
   runHealthChecks,
@@ -39,13 +40,21 @@ export async function GET(req: NextRequest) {
       console.error("health_store_failed", err)
     );
     const down = results.filter((r) => r.configured && !r.ok);
-    if (down.length > 0) {
-      // Loud, greppable line for Vercel log alerts until an email
-      // provider lands (PROP-4 wires this to actual alert emails).
-      console.error(
-        "HEALTH_ALERT sources down:",
-        down.map((d) => `${d.source} (${d.detail})`).join("; ")
-      );
+    const dates = upcomingKeyDates();
+    if (down.length > 0 || dates.length > 0) {
+      const lines = [
+        ...down.map((d) => `DOWN: ${d.source} — ${d.detail}`),
+        ...dates.map((k) => `RENEWAL: ${k.label} on ${k.date} (${k.daysAway} days)`),
+      ];
+      // Greppable for Vercel log alerts even when email is configured.
+      console.error("HEALTH_ALERT", lines.join("; "));
+      if (isCron && isEmailConfigured()) {
+        await sendEmail({
+          to: process.env.ALERT_EMAIL ?? "luke.f.miller.8@gmail.com",
+          subject: `PropPencil health: ${down.length > 0 ? `${down.length} source(s) down` : "renewal reminder"}`,
+          text: lines.join("\n") + "\n\nDetails: https://www.proppencil.com/api/health (founder login)",
+        }).catch(() => {});
+      }
     }
   } else {
     results = await latestHealthResults();
