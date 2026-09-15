@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
-    "env:dev": "node scripts/use-dev-db.mjs"
+    "env:dev": "node scripts/use-dev-db.mjs",
+    "db:migrate": "npx -y tsx scripts/db-migrate.ts",
+    "db:verify": "npx -y tsx scripts/verify-stage1.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
