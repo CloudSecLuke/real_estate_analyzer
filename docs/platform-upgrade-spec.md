@@ -1,7 +1,13 @@
 # PropPencil — Property Intelligence & Automatic Data Ingestion (Platform Upgrade Spec)
 
-> Founder directive, 2026-09-15. This is the canonical spec for the platform
-> upgrade tracked by the PROP-23 epic. Implementation order and definition of
+> **SUPERSEDED WHERE CONFLICTING** by `data-network-spec.md` (v2, same day):
+> commercial providers (RentCast/Regrid/ATTOM/MLS) are now OPTIONAL Stage-9
+> fallbacks, and the primary data layer is PropPencil's own Cincinnati-first
+> public-data network. Non-conflicting requirements here (UX flows, rent-
+> engine math, provenance model) still apply.
+>
+> Founder directive, 2026-09-15. Spec for the platform upgrade tracked by
+> the PROP-23 epic. Implementation order and definition of
 > done are at the bottom. Full original prompt preserved verbatim in spirit;
 > condensed here for repo use without losing requirements.
 
