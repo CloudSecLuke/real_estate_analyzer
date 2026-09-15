@@ -10,13 +10,20 @@ export function isEmailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY);
 }
 
-export async function sendEmail(opts: {
+export interface SendResult {
+  ok: boolean;
+  /** Provider status + response excerpt — for logs and the founder
+   *  health check only, never for user-facing output. */
+  detail: string;
+}
+
+export async function sendEmailDetailed(opts: {
   to: string;
   subject: string;
   text: string;
-}): Promise<boolean> {
+}): Promise<SendResult> {
   const key = process.env.RESEND_API_KEY;
-  if (!key) return false;
+  if (!key) return { ok: false, detail: "no RESEND_API_KEY" };
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -31,13 +38,25 @@ export async function sendEmail(opts: {
         text: opts.text,
       }),
     });
+    const body = await res.text();
     if (!res.ok) {
-      console.error("email_send_failed", res.status, await res.text());
-      return false;
+      console.error("email_send_failed", res.status, body);
+      return { ok: false, detail: `${res.status} ${body.slice(0, 200)}` };
     }
-    return true;
+    return { ok: true, detail: `accepted ${body.slice(0, 80)}` };
   } catch (err) {
     console.error("email_send_failed", err);
-    return false;
+    return {
+      ok: false,
+      detail: err instanceof Error ? err.message.slice(0, 200) : "fetch failed",
+    };
   }
+}
+
+export async function sendEmail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+}): Promise<boolean> {
+  return (await sendEmailDetailed(opts)).ok;
 }

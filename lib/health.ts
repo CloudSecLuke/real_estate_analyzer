@@ -112,6 +112,18 @@ export async function runHealthChecks(): Promise<HealthResult[]> {
       if (!a) throw new Error("null result (no record or key inactive)");
       return "property record returned";
     }),
+    runOne("resend_email", Boolean(process.env.RESEND_API_KEY), async () => {
+      const { sendEmailDetailed } = await import("./email");
+      // delivered@resend.dev is Resend's test sink: exercises the key,
+      // sender domain and API without landing in a real inbox.
+      const r = await sendEmailDetailed({
+        to: "delivered@resend.dev",
+        subject: "PropPencil email health check",
+        text: "The email pipeline works — this is the periodic health check.",
+      });
+      if (!r.ok) throw new Error(r.detail);
+      return r.detail;
+    }),
     runOne("mashvisor", Boolean(process.env.MASHVISOR_API_KEY), async () => {
       const m = await getMashvisorAnalyze({
         state: REF.state,
