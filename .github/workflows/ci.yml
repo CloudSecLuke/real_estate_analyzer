@@ -23,6 +23,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Generate Next.js route types
+        run: npx next typegen
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Unit tests
