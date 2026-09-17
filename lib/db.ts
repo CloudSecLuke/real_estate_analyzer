@@ -1,5 +1,4 @@
-import { neon } from "@neondatabase/serverless";
-import { databaseUrl } from "./dbUrl";
+import { sql as getSql } from "@/lib/sql";
 import type { Assumptions, HistoryEntry, SavedPin, SavedSearch } from "./types";
 
 // Neon Postgres (Vercel Marketplace). Lazy init so `next build` and
@@ -10,33 +9,9 @@ export function isDbConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL);
 }
 
-type Sql = ReturnType<typeof neon>;
-let _sql: Sql | null = null;
-let _schemaReady: Promise<void> | null = null;
 
-function getSql(): Sql {
-  if (!_sql) _sql = neon(databaseUrl());
-  return _sql;
-}
 
-function ensureSchema(): Promise<void> {
-  if (!_schemaReady) {
-    const sql = getSql();
-    _schemaReady = (async () => {
-      await sql`
-        CREATE TABLE IF NOT EXISTS user_state (
-          username    text PRIMARY KEY,
-          pins        jsonb NOT NULL DEFAULT '[]'::jsonb,
-          assumptions jsonb,
-          updated_at  timestamptz NOT NULL DEFAULT now()
-        )
-      `;
-      await sql`ALTER TABLE user_state ADD COLUMN IF NOT EXISTS history jsonb NOT NULL DEFAULT '[]'::jsonb`;
-      await sql`ALTER TABLE user_state ADD COLUMN IF NOT EXISTS searches jsonb NOT NULL DEFAULT '[]'::jsonb`;
-    })();
-  }
-  return _schemaReady;
-}
+// Schema is managed by migrations (npm run db:migrate) — no runtime DDL.
 
 export interface UserState {
   pins: SavedPin[];
@@ -46,7 +21,6 @@ export interface UserState {
 }
 
 export async function getUserState(username: string): Promise<UserState> {
-  await ensureSchema();
   const rows = (await getSql()`
     SELECT pins, assumptions, history, searches
     FROM user_state WHERE username = ${username}
@@ -69,7 +43,6 @@ export async function saveUserState(
   username: string,
   state: UserState
 ): Promise<void> {
-  await ensureSchema();
   await getSql()`
     INSERT INTO user_state (username, pins, assumptions, history, searches, updated_at)
     VALUES (${username}, ${JSON.stringify(state.pins)}::jsonb,

@@ -1,6 +1,5 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { neon } from "@neondatabase/serverless";
-import { databaseUrl } from "./dbUrl";
+import { sql as getSql } from "@/lib/sql";
 
 // Self-serve accounts + entitlements. The two founder accounts
 // (luke.miller / bart.miller) stay in env vars with unlimited use;
@@ -14,56 +13,13 @@ export const INVESTOR_LOOKUP_KEY = "proppencil_investor_monthly";
 const FOUNDERS = new Set(["luke.miller", "bart.miller"]);
 export const isFounder = (u: string) => FOUNDERS.has(u);
 
-type Sql = ReturnType<typeof neon>;
-let _sql: Sql | null = null;
-let _schemaReady: Promise<void> | null = null;
 
 export function isUsersDbConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL);
 }
 
-function getSql(): Sql {
-  if (!_sql) _sql = neon(databaseUrl());
-  return _sql;
-}
 
-function ensureSchema(): Promise<void> {
-  if (!_schemaReady) {
-    const sql = getSql();
-    _schemaReady = (async () => {
-      await sql`
-        CREATE TABLE IF NOT EXISTS users (
-          username      text PRIMARY KEY,
-          email         text,
-          password_hash text NOT NULL,
-          created_at    timestamptz NOT NULL DEFAULT now()
-        )
-      `;
-      await sql`
-        CREATE TABLE IF NOT EXISTS entitlements (
-          username            text PRIMARY KEY,
-          free_pencils_used   int NOT NULL DEFAULT 0,
-          pencils_this_period int NOT NULL DEFAULT 0,
-          period_start        timestamptz NOT NULL DEFAULT now(),
-          plan                text NOT NULL DEFAULT 'free',
-          plan_status         text NOT NULL DEFAULT 'none',
-          stripe_customer_id  text,
-          stripe_subscription_id text,
-          updated_at          timestamptz NOT NULL DEFAULT now()
-        )
-      `;
-      await sql`
-        CREATE TABLE IF NOT EXISTS password_resets (
-          token_hash text PRIMARY KEY,
-          username   text NOT NULL,
-          expires_at timestamptz NOT NULL,
-          used_at    timestamptz
-        )
-      `;
-    })();
-  }
-  return _schemaReady;
-}
+// Schema is managed by migrations (npm run db:migrate) — no runtime DDL.
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16);
@@ -102,7 +58,6 @@ export async function createUser(
   if (password.length < 8) {
     return { ok: false, error: "Password must be at least 8 characters." };
   }
-  await ensureSchema();
   const sql = getSql();
   const existing =
     (await sql`SELECT 1 FROM users WHERE username = ${u}`) as unknown[];
@@ -137,7 +92,6 @@ export async function createResetToken(
 ): Promise<{ token: string; email: string } | null> {
   const u = username.trim().toLowerCase();
   if (!isUsersDbConfigured() || isFounder(u)) return null;
-  await ensureSchema();
   const sql = getSql();
   const rows = (await sql`
     SELECT email FROM users WHERE username = ${u}
@@ -163,7 +117,6 @@ export async function resetPassword(
   if (!isUsersDbConfigured() || !/^[0-9a-f]{64}$/.test(token)) {
     return { ok: false, error: "That reset link is invalid or has expired." };
   }
-  await ensureSchema();
   const sql = getSql();
   const rows = (await sql`
     UPDATE password_resets SET used_at = now()
@@ -187,7 +140,6 @@ export async function verifyDbUser(
   password: string
 ): Promise<boolean> {
   if (!isUsersDbConfigured()) return false;
-  await ensureSchema();
   const rows = (await getSql()`
     SELECT password_hash FROM users WHERE username = ${username}
   `) as { password_hash: string }[];
@@ -216,7 +168,6 @@ interface EntRow {
 }
 
 async function getRow(username: string): Promise<EntRow | null> {
-  await ensureSchema();
   const rows = (await getSql()`
     SELECT free_pencils_used, pencils_this_period, period_start, plan,
            plan_status, stripe_customer_id
@@ -273,7 +224,6 @@ export async function recordPencil(
   source: "founder" | "plan" | "free"
 ): Promise<void> {
   if (source === "founder") return;
-  await ensureSchema();
   const sql = getSql();
   if (source === "free") {
     await sql`
@@ -305,7 +255,6 @@ export async function applySubscription(args: {
   subscriptionId: string | null;
   status: "active" | "canceled" | "past_due" | "none";
 }): Promise<void> {
-  await ensureSchema();
   await getSql()`
     UPDATE entitlements
     SET plan = 'investor',
@@ -320,7 +269,6 @@ export async function applySubscription(args: {
 export async function findUsernameByCustomer(
   customerId: string
 ): Promise<string | null> {
-  await ensureSchema();
   const rows = (await getSql()`
     SELECT username FROM entitlements WHERE stripe_customer_id = ${customerId}
   `) as { username: string }[];

@@ -1,5 +1,4 @@
-import { neon } from "@neondatabase/serverless";
-import { databaseUrl } from "./dbUrl";
+import { sql as getSql } from "@/lib/sql";
 import { geocodeAddress } from "./geocode";
 import { getFmr } from "./hud";
 import { getCountyMedianRent } from "./acs";
@@ -151,39 +150,12 @@ export function upcomingKeyDates(now = new Date()) {
 
 // --- storage ---------------------------------------------------------------
 
-type Sql = ReturnType<typeof neon>;
-let _sql: Sql | null = null;
-let _ready: Promise<void> | null = null;
 
-function getSql(): Sql {
-  if (!_sql) _sql = neon(databaseUrl());
-  return _sql;
-}
 
-function ensureSchema(): Promise<void> {
-  if (!_ready) {
-    _ready = (async () => {
-      await getSql()`
-        CREATE TABLE IF NOT EXISTS health_checks (
-          source     text PRIMARY KEY,
-          ok         boolean NOT NULL,
-          configured boolean NOT NULL,
-          latency_ms int NOT NULL,
-          detail     text NOT NULL,
-          checked_at timestamptz NOT NULL DEFAULT now()
-        )
-      `;
-    })();
-    _ready.catch(() => {
-      _ready = null;
-    });
-  }
-  return _ready;
-}
+// Schema is managed by migrations (npm run db:migrate) — no runtime DDL.
 
 export async function storeHealthResults(results: HealthResult[]): Promise<void> {
   if (!process.env.DATABASE_URL) return;
-  await ensureSchema();
   const sql = getSql();
   for (const r of results) {
     await sql`
@@ -210,7 +182,6 @@ export interface StoredHealth {
 
 export async function latestHealthResults(): Promise<StoredHealth[]> {
   if (!process.env.DATABASE_URL) return [];
-  await ensureSchema();
   const rows = (await getSql()`
     SELECT source, ok, configured, latency_ms, detail, checked_at
     FROM health_checks ORDER BY source

@@ -10,6 +10,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: pencil
+          POSTGRES_PASSWORD: pencil
+          POSTGRES_DB: proppencil_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U pencil"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Service-container URL only — never a real connection string here.
+      DATABASE_URL: postgresql://pencil:pencil@localhost:5432/proppencil_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply migrations
+        run: npm run db:migrate
+      - name: Re-apply (must be a no-op)
+        run: npm run db:migrate
+
   checks:
     runs-on: ubuntu-latest
     env:

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { neon } from "@neondatabase/serverless";
-import { databaseUrl } from "./dbUrl";
+import { sql as getSql } from "@/lib/sql";
 import type { NextRequest } from "next/server";
 
 // Fixed-window rate limiting backed by Postgres (PROP-2). One atomic
@@ -13,34 +12,9 @@ import type { NextRequest } from "next/server";
 // Fails OPEN: if the DB is unreachable the request proceeds — a limiter
 // outage must never lock customers out of login or paid analyses.
 
-type Sql = ReturnType<typeof neon>;
-let _sql: Sql | null = null;
-let _ready: Promise<void> | null = null;
 
-function getSql(): Sql {
-  if (!_sql) _sql = neon(databaseUrl());
-  return _sql;
-}
 
-function ensureSchema(): Promise<void> {
-  if (!_ready) {
-    _ready = (async () => {
-      await getSql()`
-        CREATE TABLE IF NOT EXISTS rate_limits (
-          bucket       text NOT NULL,
-          key          text NOT NULL,
-          window_start timestamptz NOT NULL,
-          count        int NOT NULL,
-          PRIMARY KEY (bucket, key)
-        )
-      `;
-    })();
-    _ready.catch(() => {
-      _ready = null; // allow retry on next call
-    });
-  }
-  return _ready;
-}
+// Schema is managed by migrations (npm run db:migrate) — no runtime DDL.
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -61,7 +35,6 @@ export async function checkRateLimit(
 ): Promise<RateLimitResult> {
   if (!process.env.DATABASE_URL) return { allowed: true, retryAfterSecs: 0 };
   try {
-    await ensureSchema();
     const rows = await getSql()`
       INSERT INTO rate_limits (bucket, key, window_start, count)
       VALUES (${bucket}, ${key}, now(), 1)

@@ -10,6 +10,13 @@ s = s.replace(
   /(DATABASE_URL(?:_UNPOOLED)?="postgresql:\/\/[^"]+)\/neondb/g,
   "$1/proppencil_dev"
 );
+// DATABASE_URL must be the DIRECT (non-pooled) host: the migrator and
+// bulk loaders use pg over TCP for COPY/transactions, which the pooler
+// and HTTP driver cannot do.
+s = s.replace(
+  /(DATABASE_URL="postgresql:\/\/[^"@]+@ep-[a-z0-9-]+)-pooler(\.[^"]+\/proppencil_dev)\?[^"]*"/,
+  '$1$2?sslmode=require"'
+);
 writeFileSync(path, s);
 console.log(
   before === s
