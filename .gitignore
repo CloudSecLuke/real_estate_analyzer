@@ -50,3 +50,6 @@ next-env.d.ts
 # agent tooling artifacts
 .agents/
 .claude/
+
+# bulk-loader downloads (xlsx)
+.cache/
