@@ -1,6 +1,7 @@
 "use client";
 
 import BatchImport from "@/components/BatchImport";
+import AddressAutocomplete from "@/components/AddressAutocomplete";
 import InfoTip from "@/components/InfoTip";
 import { AppMark, MarkOnLight } from "@/components/PencilMark";
 import type {
@@ -168,22 +169,15 @@ export default function AssumptionsSidebar({
       >
         <label className="flex flex-col gap-[5px]">
           <MicroLabel>Address or listing URL</MicroLabel>
-          <input
-            required
+          {/* live typeahead over PropPencil's own county records; the
+              user's previously penciled addresses surface at the top */}
+          <AddressAutocomplete
             value={address}
-            onChange={(e) => onAddress(e.target.value)}
+            onChange={onAddress}
+            history={history}
             placeholder="123 Main St, Cincinnati, OH"
-            list="address-history"
             className={`${inputBase} w-full px-[11px] py-[10px] text-[13px]`}
           />
-          {/* previously penciled addresses, most recent first */}
-          <datalist id="address-history">
-            {history.map((h) => (
-              <option key={h.address} value={h.address}>
-                {`${h.bedrooms} bed · $${h.price.toLocaleString("en-US")}`}
-              </option>
-            ))}
-          </datalist>
         </label>
         <div className="grid grid-cols-[1fr_76px] gap-2">
           <label className="flex flex-col gap-[5px]">

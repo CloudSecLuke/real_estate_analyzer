@@ -1215,6 +1215,11 @@ export default function Home() {
                   {data.property.matchedAddress}
                 </h2>
                 <span className="text-[13px] text-label">{subhead}</span>
+                {data.factsProvenance && (
+                  <span className="inline-flex w-fit items-center gap-[6px] rounded-[5px] border border-[#cfe3d4] bg-[#eef6f0] px-[9px] py-[3px] text-[11.5px] font-semibold text-[#0f6b44]">
+                    ✓ Facts from public record — {data.factsProvenance}
+                  </span>
+                )}
                 {autoFilled && (
                   <span className="text-[12px] font-medium text-positive">✓ {autoFilled}</span>
                 )}
