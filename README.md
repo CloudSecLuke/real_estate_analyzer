@@ -67,8 +67,15 @@ with `gh issue list --label P0`, reference tickets in commits
 | [BLS](https://www.bls.gov/) | County unemployment rate | None |
 | [FRED](https://fred.stlouisfed.org/) | Current 30-yr mortgage average (auto-fills the rate default) | None |
 | Embedded statewide tax table | Tax-rate fallback when no Census key | None |
+| [Hamilton Co. Auditor — Monthly Tax Export](https://hamiltoncountyauditor.org/hamilton/revalue.asp) | 323k parcels: situs address, tax bill, assessed value, last sale, flags (monthly bulk xlsx) | None |
+| [Hamilton Co. Auditor — Historic Sales Export](https://hamiltoncountyauditor.org/hamilton/revalue.asp) | Transfer events + dwelling characteristics (baths, rooms, style, year built) | None |
+| [Hamilton Co. Auditor — Building Info Export](https://hamiltoncountyauditor.org/hamilton/revalue.asp) | Finished sqft by floor, basement/attic, stories | None |
+| CAGIS Open Data (ArcGIS) | Parcel centroids only (lat/lon for owned properties) | None |
+| Census TIGERweb ZCTA5 | ZIP polygons for the postal-code spatial join | None |
 | [ATTOM Data](https://api.developer.attomdata.com/) *(optional)* | Beds/baths/sqft, **actual tax bill**, value AVM, rental AVM, sale history | Free trial, paid after |
 | [Mashvisor](https://www.mashvisor.com/api-doc-v2) *(optional)* | Airbnb occupancy/nightly rate/revenue, rental comps, market historicals, ML deal score | Paid ($129/mo) |
+| [RentCast](https://developers.rentcast.io/) *(optional)* | Nationwide rent estimate + comps fallback — cached per TTL, never accumulated | Free tier / paid |
+| Regrid *(parked)* | Address typeahead — replaced by owned trigram typeahead over county data; adapter kept for opt-in | — |
 
 The free path is fully functional on its own. When `ATTOM_API_KEY` is set,
 each analysis upgrades itself: the actual tax bill replaces the statewide
@@ -76,6 +83,13 @@ rate estimate, the real bedroom count picks the FMR row, and ATTOM's rental
 AVM becomes the market-rent baseline (a manual override still wins; Section 8
 always keys off FMR). If ATTOM has no record or the call fails, the analysis
 silently falls back to the free path.
+
+County/Census average rents are a **benchmark only** — property-level
+estimates come from property-specific sources (auditor facts, rental AVMs,
+comps), and any market-level fallback is labeled as such with reduced
+confidence. In Hamilton County the auditor exports are primary: analyses
+short-circuit to owned data with provenance and skip the commercial
+property lookup entirely.
 
 When `MASHVISOR_API_KEY` is set, two more things light up:
 

@@ -1,3 +1,5 @@
+> **ARCHIVED (v1).** Superseded by `../technical-implementation-spec.md` (v3, canonical). Kept for history only.
+
 # PropPencil — Property Intelligence & Automatic Data Ingestion (Platform Upgrade Spec)
 
 > **SUPERSEDED WHERE CONFLICTING** by `data-network-spec.md` (v2, same day):

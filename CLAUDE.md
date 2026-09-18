@@ -19,7 +19,15 @@ from the GitHub issue number). Labels: priority `P0`/`P1`/`P2` plus area
 - Live at proppencil.com (the apex 308-redirects to **www.**proppencil.com —
   use the www host for API probes and webhooks).
 - Deploy with `npx -y vercel@latest deploy --prod` (the git-push webhook has
-  been unreliable). Run typecheck + `npm test` first.
+  been unreliable). Run typecheck + `npm test` first, and **`npm run
+  db:migrate` against production is MANDATORY before any deploy that
+  includes new migrations** — all lazy/runtime DDL is gone; the app
+  assumes migrated tables exist. Migrations are idempotent and CI-tested.
+- Data loads are scripts, not request-path code: `npm run
+  data:ingest:hc-auditor -- --as-of <date>` (monthly, matches the
+  Auditor's "File current as of" date on revalue.asp), `npm run
+  data:ingest:hamilton` (CAGIS centroids, monthly, after the auditor
+  load), `npm run data:geo:zcta` (ZIP/city, after centroids).
 - Stripe is **live mode** in the production env; the development env keeps
   sandbox test keys on purpose. Production values for Stripe are marked
   Sensitive in Vercel and cannot be pulled — verify changes functionally

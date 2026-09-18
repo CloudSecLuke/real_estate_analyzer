@@ -1,9 +1,9 @@
-# PropPencil Technical Implementation Spec (v3 — HIGHEST PRECEDENCE)
+# PropPencil Technical Implementation Spec (CANONICAL)
 
-> Founder directive 2026-09-15 (third revision, "Part 2 technical contract").
-> Precedence: **this doc > data-network-spec.md (v2 strategy) > repo
-> conventions > platform-upgrade-spec.md (v1)**. Full text delivered in
-> session; this file records the operative requirements.
+> Founder directive 2026-09-15 ("Part 2 technical contract"), revised
+> 2026-09-16 after external review (see Revision section at bottom).
+> This is the SINGLE canonical spec. v1/v2 are archived in `archive/`
+> and apply only where nothing here contradicts them.
 
 ## Reframing vs v2
 
@@ -107,3 +107,34 @@ parcel provider smoke-verified (10 real parcels ingested, idempotent
 re-run = 0 dupes; CAGIS ArcGIS endpoint + as-is license recorded in
 data_sources). Legacy analyze pipeline (lib/metrics etc.) keeps serving
 production until the new engine replaces it.
+
+## Revision 2026-09-16 (external review — implemented in CLAUDE_CODE_BRIEF phases)
+
+- **Bulk government facts live in typed tables** (`auditor_parcels`,
+  `auditor_dwellings`, `auditor_sales`, typed columns on `properties`)
+  with row-level provenance (`facts_source_id`, `facts_as_of`,
+  `content_hash`). `data_points` is reserved for cross-source conflicts
+  and user overrides only — never for every fact.
+- **Raw payloads are not stored for government bulk sources.** The loader
+  records file sha256 + as-of date in `ingestion_runs.metadata`; keep the
+  source xlsx in object storage if reprocessability is wanted.
+  `raw_source_records` remains for paid-provider payloads where terms
+  permit.
+- **`provider_cache` replaces the Next.js Data Cache** for every external
+  call (visible, deploy-surviving, cost-accounted; expired rows deleted
+  nightly; commercial responses never outlive their TTL). **`analyses`
+  persists every pencil** (formula_version, full snapshot, provider call
+  log + cost) — repeat analyses are near-free and reproducible, and the
+  `analyses` table drives market-expansion decisions, not the spec
+  (`/api/admin/demand`).
+- **Hamilton facts source is the Auditor bulk exports**
+  (`docs/hamilton-auditor-exports.md`; monthly load via
+  `npm run data:ingest:hc-auditor`). CAGIS supplies **centroids only**
+  (`npm run data:ingest:hamilton`). Hamilton analyses short-circuit to
+  owned facts with provenance and call ATTOM for the rental AVM only.
+- **Regrid is parked** (adapter kept, out of default priority; owned
+  trigram typeahead serves the deep market). **RentCast is the
+  nationwide rent fallback**, cached per TTL, never accumulated into a
+  durable dataset.
+- Schema is managed exclusively by `migrations/` via `npm run db:migrate`
+  (idempotent, CI-tested); all runtime DDL was removed.

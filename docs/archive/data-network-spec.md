@@ -1,3 +1,5 @@
+> **ARCHIVED (v2).** Superseded by `../technical-implementation-spec.md` (v3, canonical). Kept for history only.
+
 # PropPencil Data Network — Cincinnati-First Proprietary Property Data (v2 spec)
 
 > Founder directive 2026-09-15 (second revision). **Where this conflicts with
