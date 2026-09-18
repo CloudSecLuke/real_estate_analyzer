@@ -54,9 +54,12 @@ async function fetchPage(base: string, offset: number): Promise<ArcgisFeature[]>
     try {
       const res = await fetch(`${base}/query?${params}`, {
         signal: AbortSignal.timeout(90_000),
+        cache: "no-store",
       });
       if (res.status === 429) throw new IngestError("rate_limited", "arcgis 429");
-      if (!res.ok) throw new IngestError("temporary_failure", `arcgis ${res.status}`);
+      // 304/5xx are transient (CDN hiccups observed in production) — plain
+      // Error falls into the retry loop; IngestError aborts immediately.
+      if (!res.ok) throw new Error(`arcgis transient ${res.status}`);
       const json = (await res.json()) as { features?: ArcgisFeature[]; error?: { message?: string } };
       if (json.error) throw new IngestError("malformed_response", json.error.message ?? "arcgis error");
       return json.features ?? [];
