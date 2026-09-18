@@ -12,7 +12,8 @@
     "db:verify": "npx -y tsx scripts/verify-stage1.ts",
     "db:verify:stage2": "npx -y tsx scripts/verify-stage2.ts",
     "data:ingest:hamilton": "npx -y tsx scripts/ingest-hamilton.ts",
-    "data:ingest:hc-auditor": "npx -y tsx scripts/ingest-hamilton-auditor.ts"
+    "data:ingest:hc-auditor": "npx -y tsx scripts/ingest-hamilton-auditor.ts",
+    "data:geo:zcta": "npx -y tsx scripts/geo-zcta-join.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
