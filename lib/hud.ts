@@ -1,4 +1,5 @@
 import type { FmrData } from "./types";
+import { cachedValue, TTL } from "@/lib/providerCache";
 
 // HUD Fair Market Rent API — free with a token from
 // https://www.huduser.gov/portal/dataset/fmr-api.html
@@ -25,7 +26,7 @@ function toByBedroom(row: HudBedroomRow): FmrData["byBedroom"] {
   };
 }
 
-export async function getFmr(
+async function getFmrUncached(
   countyFips: string,
   zip: string
 ): Promise<FmrData> {
@@ -38,7 +39,6 @@ export async function getFmr(
   const entityId = `${countyFips}99999`;
   const res = await fetch(`${HUD_URL}/${entityId}`, {
     headers: { Authorization: `Bearer ${token}` },
-    next: { revalidate: 86400 },
   });
   if (res.status === 401) throw new Error("HUD API token was rejected (401).");
   if (!res.ok) throw new Error(`HUD FMR API returned ${res.status}`);
@@ -83,4 +83,10 @@ export async function getFmr(
     smallAreaUsed: false,
     byBedroom: toByBedroom(data.basicdata),
   };
+}
+
+export async function getFmr(countyFips: string, zip: string): Promise<FmrData> {
+  return cachedValue("hud", `fmr:${countyFips}:${zip}`, TTL.hud, () =>
+    getFmrUncached(countyFips, zip)
+  );
 }

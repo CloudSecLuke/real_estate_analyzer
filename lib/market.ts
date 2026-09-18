@@ -1,4 +1,5 @@
 import type { MarketHealth } from "./types";
+import { cachedValue, TTL } from "@/lib/providerCache";
 
 // County trajectory: population + median home value (ACS 5-year, two
 // vintages) and unemployment (BLS LAUS, keyless). Cheap Midwest markets
@@ -24,8 +25,7 @@ async function acsRow(
     key,
   });
   const res = await fetch(
-    `https://api.census.gov/data/${year}/acs/acs5?${params}`,
-    { next: { revalidate: 2592000 } }
+    `https://api.census.gov/data/${year}/acs/acs5?${params}`
   );
   if (!res.ok) return {};
   const json = await res.json().catch(() => null);
@@ -44,8 +44,7 @@ async function blsUnemployment(
   // LAUS county unemployment rate series; keyless GET, tightly cached
   const series = `LAUCN${countyFips}0000000003`;
   const res = await fetch(
-    `https://api.bls.gov/publicAPI/v2/timeseries/data/${series}?latest=true`,
-    { next: { revalidate: 604800 } }
+    `https://api.bls.gov/publicAPI/v2/timeseries/data/${series}?latest=true`
   );
   if (!res.ok) return {};
   const json = await res.json().catch(() => null);
@@ -61,7 +60,7 @@ async function blsUnemployment(
   };
 }
 
-export async function getMarketHealth(
+async function getMarketHealthUncached(
   countyFips: string,
   countyName: string
 ): Promise<MarketHealth | null> {
@@ -96,4 +95,10 @@ export async function getMarketHealth(
   const hasAny =
     health.population !== undefined || health.unemploymentPct !== undefined;
   return hasAny ? health : null;
+}
+
+export async function getMarketHealth(countyFips: string, countyName: string): Promise<MarketHealth | null> {
+  return cachedValue("bls_census", `market:${countyFips}`, TTL.bls, () =>
+    getMarketHealthUncached(countyFips, countyName)
+  );
 }

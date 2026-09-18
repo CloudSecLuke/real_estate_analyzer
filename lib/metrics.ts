@@ -6,6 +6,10 @@ import type {
   ScenarioResult,
 } from "./types";
 
+// Persisted with every saved analysis so old pencils stay explicable
+// when the engine changes (CLAUDE_CODE_BRIEF Phase 4 / v3 spec §61).
+export const FORMULA_VERSION = "legacy-1.0.0";
+
 export const DEFAULT_ASSUMPTIONS: Omit<Assumptions, "price" | "bedrooms"> = {
   units: 1,
   downPaymentPct: 20,

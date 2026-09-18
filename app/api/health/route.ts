@@ -35,6 +35,16 @@ export async function GET(req: NextRequest) {
   const runLive = isCron || req.nextUrl.searchParams.get("run") === "1";
   let results;
   if (runLive) {
+    if (isCron) {
+      // nightly provider-cache hygiene: expired commercial responses must
+      // not outlive their TTL (vendor terms) — Phase 4 step 3.
+      const { sql } = await import("@/lib/sql");
+      try {
+        await sql()`DELETE FROM provider_cache WHERE expires_at < now()`;
+      } catch (err) {
+        console.error("provider_cache_cleanup_failed", err);
+      }
+    }
     results = await runHealthChecks();
     await storeHealthResults(results).catch((err) =>
       console.error("health_store_failed", err)

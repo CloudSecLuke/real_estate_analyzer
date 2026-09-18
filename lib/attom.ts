@@ -1,4 +1,5 @@
 import type { AttomData } from "./types";
+import { cachedValue, TTL } from "@/lib/providerCache";
 
 // ATTOM Data property API — optional enhancement layer. Free trial key at
 // https://api.developer.attomdata.com/ (paid after trial). Without a key,
@@ -22,7 +23,6 @@ async function attomFetch(
   const params = new URLSearchParams({ address1, address2 });
   const res = await fetch(`${BASE}/${path}?${params}`, {
     headers: { Accept: "application/json", apikey: key },
-    next: { revalidate: 86400 },
   });
   if (res.status === 401) {
     throw new Error(
@@ -89,7 +89,7 @@ function hasData(d: AttomData): boolean {
  * no key is configured or ATTOM has no record; throws only when every
  * request failed (e.g. bad key), so partial data still comes through.
  */
-export async function getAttomData(
+async function getAttomDataUncached(
   matchedAddress: string
 ): Promise<AttomData | null> {
   const key = process.env.ATTOM_API_KEY;
@@ -117,4 +117,34 @@ export async function getAttomData(
     ...(rental instanceof Error || !rental ? {} : parseRentalAvm(rental)),
   };
   return hasData(data) ? data : null;
+}
+
+export async function getAttomData(matchedAddress: string): Promise<AttomData | null> {
+  return cachedValue("attom", `property:${matchedAddress.toUpperCase()}`, TTL.attomProperty, () =>
+    getAttomDataUncached(matchedAddress)
+  );
+}
+
+/** Rent-only ATTOM call for the Hamilton short-circuit (Phase 4 step 5):
+ *  property facts come from the Auditor there, so only valuation/rentalavm
+ *  is spent — one call instead of two, and no property/tax lookup. */
+async function getAttomRentalAvmUncached(
+  matchedAddress: string
+): Promise<AttomData | null> {
+  const key = process.env.ATTOM_API_KEY;
+  if (!key) return null;
+  const [street, ...rest] = matchedAddress.split(",");
+  const address1 = street?.trim() ?? "";
+  const address2 = rest.join(",").trim();
+  if (!address1 || !address2) return null;
+  const rental = await attomFetch("valuation/rentalavm", address1, address2, key);
+  if (!rental) return null;
+  const data: AttomData = { ...parseRentalAvm(rental) };
+  return data.rentalAvm != null ? data : null;
+}
+
+export async function getAttomRentalAvm(matchedAddress: string): Promise<AttomData | null> {
+  return cachedValue("attom", `rentalavm:${matchedAddress.toUpperCase()}`, TTL.rentcastRent, () =>
+    getAttomRentalAvmUncached(matchedAddress)
+  );
 }

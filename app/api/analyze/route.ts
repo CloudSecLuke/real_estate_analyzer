@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { canPencil, recordPencil } from "@/lib/users";
+import { runWithCallLog } from "@/lib/providerCache";
+import { findHamiltonFacts, recordAnalysis } from "@/lib/analyses";
+import { FORMULA_VERSION } from "@/lib/metrics";
+import { getAttomRentalAvm } from "@/lib/attom";
 import { checkRateLimit, tooMany } from "@/lib/ratelimit";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 import { geocodeAddress } from "@/lib/geocode";
@@ -65,12 +69,22 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const { result: payload, calls } = await runWithCallLog(async () => {
     const property = await geocodeAddress(address);
 
     // "312 WALNUT ST, CINCINNATI, OH, 45202" → street / city components
     const addrParts = property.matchedAddress.split(",").map((s) => s.trim());
     const street = addrParts[0] ?? "";
     const city = addrParts[1] ?? "";
+
+    // Hamilton short-circuit (Phase 4 step 5): if this address resolves to
+    // an owned auditor-backed property, its facts and tax bill come from
+    // PropPencil data — the ATTOM property/tax call is skipped entirely
+    // and ATTOM is used for the rental AVM only. Bedrooms stay NULL/user.
+    const hamiltonFacts =
+      property.countyFips === "39061"
+        ? await findHamiltonFacts(street, property.zip).catch(() => null)
+        : null;
 
     let fmr: FmrData | null = null;
     let fmrError: boolean | undefined;
@@ -81,7 +95,10 @@ export async function POST(req: NextRequest) {
     const [fmrResult, flood, attomResult, acsRent, tax, mashvisorResult, marketHealth] = await Promise.all([
       getFmr(property.countyFips, property.zip).catch((e: Error) => e),
       getFloodZone(property.lat, property.lon),
-      getAttomData(property.matchedAddress).catch((e: Error) => e),
+      (hamiltonFacts
+        ? getAttomRentalAvm(property.matchedAddress)
+        : getAttomData(property.matchedAddress)
+      ).catch((e: Error) => e),
       getCountyMedianRent(property.countyFips, property.countyName).catch(
         () => null
       ),
@@ -128,7 +145,23 @@ export async function POST(req: NextRequest) {
       // metering write failure must never break the analysis
     });
 
-    const payload: AnalyzeResponse = {
+    let factsProvenance: string | undefined;
+    if (hamiltonFacts) {
+      attom = {
+        ...(attom ?? {}),
+        baths: hamiltonFacts.baths ?? undefined,
+        sqft: hamiltonFacts.livingAreaSqft ?? undefined,
+        yearBuilt: hamiltonFacts.yearBuilt ?? undefined,
+        assessedValue: hamiltonFacts.assessedValue ?? undefined,
+        annualTaxAmount: hamiltonFacts.annualTaxes ?? undefined,
+        lastSalePrice: hamiltonFacts.lastSalePrice ?? undefined,
+        lastSaleDate: hamiltonFacts.lastSaleDate ?? undefined,
+      };
+      attomError = undefined;
+      factsProvenance = `Hamilton County Auditor, file as of ${hamiltonFacts.factsAsOf ?? "latest load"}`;
+    }
+
+    const p: AnalyzeResponse = {
       property,
       fmr,
       fmrError,
@@ -140,7 +173,24 @@ export async function POST(req: NextRequest) {
       attomError,
       mashvisor,
       mashvisorError,
+      factsProvenance,
     };
+    return p;
+    });
+
+    // persist the pencil — never fail the request over bookkeeping
+    await recordAnalysis({
+      username: user,
+      addressInput: address,
+      matchedAddress: payload.property.matchedAddress,
+      countyFips: payload.property.countyFips,
+      state: payload.property.state,
+      inputs: { address },
+      result: payload,
+      formulaVersion: FORMULA_VERSION,
+      providerCalls: calls,
+    }).catch((err) => console.error("record_analysis_failed", err));
+
     return NextResponse.json(payload);
   } catch (e) {
     const message = e instanceof Error ? e.message : "Analysis failed";

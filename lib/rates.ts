@@ -1,3 +1,4 @@
+import { cachedValue, TTL } from "@/lib/providerCache";
 // Current 30-year fixed mortgage average (Freddie Mac PMMS via FRED's
 // keyless CSV endpoint). Used to auto-fill the interest-rate assumption
 // so analyses don't run on a stale hardcoded default.
@@ -9,8 +10,8 @@ export interface MortgageRate {
   asOf: string; // e.g. "2026-09-10"
 }
 
-export async function getMortgageRate(): Promise<MortgageRate | null> {
-  const res = await fetch(FRED_CSV, { next: { revalidate: 86400 } });
+async function getMortgageRateUncached(): Promise<MortgageRate | null> {
+  const res = await fetch(FRED_CSV);
   if (!res.ok) return null;
   const text = await res.text();
   const lines = text.trim().split("\n");
@@ -22,4 +23,10 @@ export async function getMortgageRate(): Promise<MortgageRate | null> {
     }
   }
   return null;
+}
+
+export async function getMortgageRate(): Promise<MortgageRate | null> {
+  return cachedValue("fred", "mortgage30us", TTL.fred, () =>
+    getMortgageRateUncached()
+  );
 }

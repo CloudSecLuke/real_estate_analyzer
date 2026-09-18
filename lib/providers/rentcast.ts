@@ -12,6 +12,7 @@ import type {
   TaxProvider,
   TaxRecord,
 } from "./types";
+import { cachedValue, TTL } from "@/lib/providerCache";
 
 // RentCast adapter (PROP-27; spec §6): property records + attributes + tax
 // history, sale/rental listings, long-term rent AVM with comparables, sale
@@ -31,15 +32,21 @@ function addrString(a: CanonicalAddress): string {
   return `${a.streetAddress}, ${a.city}, ${a.state}${a.postalCode ? " " + a.postalCode : ""}`;
 }
 
-async function rc<T>(path: string, params: Record<string, string | number | undefined>): Promise<T | null> {
+async function rc<T>(
+  path: string,
+  params: Record<string, string | number | undefined>,
+  ttlSeconds: number = TTL.rentcastRent
+): Promise<T | null> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== "") qs.set(k, String(v));
   }
-  const res = await fetch(`${BASE}${path}?${qs}`, { headers: headers() });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error(`rentcast ${path} ${res.status}`);
-  return (await res.json()) as T;
+  return cachedValue("rentcast", `${path}?${qs}`, ttlSeconds, async () => {
+    const res = await fetch(`${BASE}${path}?${qs}`, { headers: headers() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`rentcast ${path} ${res.status}`);
+    return (await res.json()) as T;
+  });
 }
 
 // RentCast response shapes (subset, defensive)
@@ -87,7 +94,7 @@ function latestTax(p: RcProperty): { year?: number; total?: number } | undefined
 export const rentcastProperty: PropertyDataProvider = {
   name: NAME,
   async getProperty(input): Promise<PropertyRecord | null> {
-    const rows = await rc<RcProperty[]>("/properties", { address: addrString(input.address) });
+    const rows = await rc<RcProperty[]>("/properties", { address: addrString(input.address) }, TTL.attomProperty);
     const p = rows?.[0];
     if (!p) return null;
     const tax = latestTax(p);
@@ -203,7 +210,8 @@ export const rentcastRental: RentalDataProvider = {
         bathrooms: input.bathrooms,
         squareFootage: input.livingAreaSqFt,
         propertyType: input.propertyType,
-      }
+      },
+      TTL.rentcastComps
     );
     return (avm?.comparables ?? [])
       .filter((c) => typeof c.price === "number" && c.price! > 0)

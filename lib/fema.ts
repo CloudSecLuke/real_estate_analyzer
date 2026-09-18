@@ -1,11 +1,12 @@
 import type { FloodData } from "./types";
+import { cachedValue, TTL } from "@/lib/providerCache";
 
 // FEMA National Flood Hazard Layer — free ArcGIS REST service.
 // Layer 28 = flood hazard zones.
 const NFHL_URL =
   "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query";
 
-export async function getFloodZone(lat: number, lon: number): Promise<FloodData> {
+async function getFloodZoneUncached(lat: number, lon: number): Promise<FloodData> {
   const params = new URLSearchParams({
     geometry: `${lon},${lat}`,
     geometryType: "esriGeometryPoint",
@@ -17,7 +18,6 @@ export async function getFloodZone(lat: number, lon: number): Promise<FloodData>
   });
   try {
     const res = await fetch(`${NFHL_URL}?${params}`, {
-      next: { revalidate: 86400 },
       signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) throw new Error(`FEMA NFHL returned ${res.status}`);
@@ -41,4 +41,10 @@ export async function getFloodZone(lat: number, lon: number): Promise<FloodData>
       source: "FEMA NFHL (lookup failed)",
     };
   }
+}
+
+export async function getFloodZone(lat: number, lon: number): Promise<FloodData> {
+  return cachedValue("fema", `flood:${lat.toFixed(5)}:${lon.toFixed(5)}`, TTL.fema, () =>
+    getFloodZoneUncached(lat, lon)
+  );
 }

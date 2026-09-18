@@ -1,3 +1,4 @@
+import { cachedValue, TTL } from "@/lib/providerCache";
 import type {
   AddressProvider,
   AddressSuggestion,
@@ -44,9 +45,16 @@ export const regridAddressProvider: AddressProvider = {
   name: "regrid",
   async autocomplete(query, signal): Promise<AddressSuggestion[]> {
     const url = `${BASE}/typeahead.json?query=${encodeURIComponent(query)}&token=${token()}`;
-    const res = await fetch(url, { signal });
-    if (!res.ok) throw new Error(`regrid typeahead ${res.status}`);
-    const json = (await res.json()) as { data?: RegridTypeaheadHit[] } | RegridTypeaheadHit[];
+    const json = await cachedValue(
+      "regrid",
+      `typeahead:${query.toUpperCase().trim()}`,
+      TTL.regrid,
+      async () => {
+        const res = await fetch(url, { signal });
+        if (!res.ok) throw new Error(`regrid typeahead ${res.status}`);
+        return (await res.json()) as { data?: RegridTypeaheadHit[] } | RegridTypeaheadHit[];
+      }
+    );
     const hits = Array.isArray(json) ? json : (json.data ?? []);
     const seen = new Set<string>();
     const out: AddressSuggestion[] = [];
@@ -108,13 +116,16 @@ interface RegridParcelFeature {
 export const regridParcelProvider: ParcelProvider = {
   name: "regrid",
   async getParcelById(id): Promise<ParcelRecord | null> {
-    const res = await fetch(`${BASE}/parcels/${encodeURIComponent(id)}.json?token=${token()}`);
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`regrid parcel ${res.status}`);
-    const json = (await res.json()) as {
-      parcels?: { features?: RegridParcelFeature[] };
-      features?: RegridParcelFeature[];
-    };
+    const json = await cachedValue("regrid", `parcel:${id}`, TTL.regrid, async () => {
+      const res = await fetch(`${BASE}/parcels/${encodeURIComponent(id)}.json?token=${token()}`);
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`regrid parcel ${res.status}`);
+      return (await res.json()) as {
+        parcels?: { features?: RegridParcelFeature[] };
+        features?: RegridParcelFeature[];
+      };
+    });
+    if (json == null) return null;
     const feature = json.parcels?.features?.[0] ?? json.features?.[0];
     const f = feature?.properties?.fields;
     if (!f) return null;

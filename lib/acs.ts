@@ -1,4 +1,5 @@
 import type { AcsRentData } from "./types";
+import { cachedValue, TTL } from "@/lib/providerCache";
 
 // County-level median gross rent BY BEDROOM COUNT from Census ACS 5-year
 // (table B25031). This is the local reality check on HUD FMR: FMR is a
@@ -16,7 +17,7 @@ const INFLATION_TO_CURRENT = 1.15;
 
 const ACS_URL = `https://api.census.gov/data/${ACS_YEAR}/acs/acs5`;
 
-export async function getCountyMedianRent(
+async function getCountyMedianRentUncached(
   countyFips: string,
   countyName: string
 ): Promise<AcsRentData | null> {
@@ -36,10 +37,8 @@ export async function getCountyMedianRent(
   // DP04_0005E: the county's actual rental vacancy rate
   const vacancyParams = new URLSearchParams({ get: "DP04_0005E", ...geo });
   const [res, vacancyRes] = await Promise.all([
-    fetch(`${ACS_URL}?${params}`, { next: { revalidate: 2592000 } }),
-    fetch(`${ACS_URL}/profile?${vacancyParams}`, {
-      next: { revalidate: 2592000 },
-    }).catch(() => null),
+    fetch(`${ACS_URL}?${params}`),
+    fetch(`${ACS_URL}/profile?${vacancyParams}`).catch(() => null),
   ]);
   if (!res.ok) return null;
   const json = await res.json().catch(() => null);
@@ -70,4 +69,10 @@ export async function getCountyMedianRent(
     source: `${countyName} median gross rent by bedrooms (Census ACS ${ACS_YEAR}, inflated ×${INFLATION_TO_CURRENT})`,
     rentalVacancyPct,
   };
+}
+
+export async function getCountyMedianRent(countyFips: string, countyName: string): Promise<AcsRentData | null> {
+  return cachedValue("census_acs", `acs:${countyFips}`, TTL.acs, () =>
+    getCountyMedianRentUncached(countyFips, countyName)
+  );
 }

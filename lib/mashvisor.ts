@@ -5,6 +5,7 @@ import type {
   MashvisorData,
   RentByBedroom,
 } from "./types";
+import { cachedValue, TTL } from "@/lib/providerCache";
 
 // Mashvisor API — optional paid subscription ($129/mo tier). Powers the
 // short-term-rental (Airbnb) scenario and the on-demand data-fidelity
@@ -52,7 +53,6 @@ async function mvFetch(
         : {}),
     },
     body: method === "POST" ? qs.toString() : undefined,
-    next: { revalidate: 86400 },
   });
   if (res.status === 401 || res.status === 403) {
     throw new Error(
@@ -89,7 +89,7 @@ interface AddressParams {
  * the form. Returns null when no key is configured; each call fails
  * independently so partial data still comes through.
  */
-export async function getMashvisorAnalyze(
+async function getMashvisorAnalyzeUncached(
   p: AddressParams
 ): Promise<MashvisorData | null> {
   if (!process.env.MASHVISOR_API_KEY) return null;
@@ -223,7 +223,7 @@ function nearestNeighborhood(list: any[], lat: number, lon: number): any {
  * On-demand deep comparison (~6 calls). Each section fails independently
  * into `errors` so one bad endpoint doesn't sink the panel.
  */
-export async function getMashvisorCompare(
+async function getMashvisorCompareUncached(
   req: CompareRequest
 ): Promise<CompareResponse> {
   requireKey();
@@ -367,4 +367,19 @@ export async function getMashvisorCompare(
     neighborhoodHistorical,
     errors,
   };
+}
+
+export async function getMashvisorAnalyze(p: AddressParams): Promise<MashvisorData | null> {
+  return cachedValue("mashvisor", `analyze:${p.state}:${p.city}:${p.zip}:${p.address.toUpperCase()}`, TTL.mashvisor, () =>
+    getMashvisorAnalyzeUncached(p)
+  );
+}
+
+export async function getMashvisorCompare(req: CompareRequest): Promise<CompareResponse> {
+  return cachedValue(
+    "mashvisor",
+    `compare:${req.state}:${req.city}:${req.zip}:${req.address.toUpperCase()}`,
+    TTL.mashvisor,
+    () => getMashvisorCompareUncached(req)
+  );
 }

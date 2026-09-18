@@ -1,3 +1,4 @@
+import { cachedValue, TTL } from "@/lib/providerCache";
 import type { TaxEstimate } from "./types";
 
 // Free fallback: statewide average effective property tax rates
@@ -37,7 +38,7 @@ export function estimateTaxRate(state: string): TaxEstimate {
 // or on any failure, fall back to the statewide table above.
 const ACS_URL = "https://api.census.gov/data/2023/acs/acs5";
 
-export async function estimateTaxRateForCounty(
+async function estimateTaxRateForCountyUncached(
   countyFips: string,
   state: string,
   countyName: string
@@ -51,9 +52,7 @@ export async function estimateTaxRateForCounty(
         in: `state:${countyFips.slice(0, 2)}`,
         key,
       });
-      const res = await fetch(`${ACS_URL}?${params}`, {
-        next: { revalidate: 2592000 }, // county medians move yearly at most
-      });
+      const res = await fetch(`${ACS_URL}?${params}`);
       if (res.ok) {
         const json = await res.json();
         const taxes = Number(json?.[1]?.[0]);
@@ -74,4 +73,14 @@ export async function estimateTaxRateForCounty(
     }
   }
   return estimateTaxRate(state);
+}
+
+export async function estimateTaxRateForCounty(
+  countyFips: string,
+  state: string,
+  countyName: string
+): Promise<TaxEstimate> {
+  return cachedValue("census_acs", `taxrate:${countyFips}:${state}`, TTL.acs, () =>
+    estimateTaxRateForCountyUncached(countyFips, state, countyName)
+  );
 }

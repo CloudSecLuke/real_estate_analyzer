@@ -112,6 +112,9 @@ export interface AnalyzeResponse {
   attomError?: boolean;
   mashvisor?: MashvisorData | null;
   mashvisorError?: boolean;
+  /** Set when property facts came from PropPencil-owned data instead of a
+   *  commercial provider, e.g. "Hamilton County Auditor, file as of 2026-08-31". */
+  factsProvenance?: string;
 }
 
 export interface Assumptions {
