@@ -105,7 +105,7 @@ export default function AddressAutocomplete({
   }
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative block w-full">
       <input
         required
         value={value}
@@ -131,7 +131,7 @@ export default function AddressAutocomplete({
         className={className}
       />
       {open && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-[8px] border border-border bg-card shadow-[0_8px_24px_rgba(23,23,23,.12)]">
+        <div className="absolute left-0 top-full z-50 mt-1 w-full overflow-hidden rounded-[8px] border border-border bg-card shadow-[0_8px_24px_rgba(23,23,23,.12)]">
           {items.map((s, i) => (
             <button
               key={s.displayAddress + (s.fromHistory ? "-h" : "")}
@@ -144,7 +144,7 @@ export default function AddressAutocomplete({
                 i === active ? "bg-accent-tint" : "hover:bg-accent-tint"
               }`}
             >
-              <span className="w-full truncate text-[12.5px] font-medium text-ink">
+              <span className="w-full break-words text-[12.5px] font-medium leading-snug text-ink">
                 {s.displayAddress}
               </span>
               {s.note && (

@@ -444,17 +444,17 @@ export default function AssumptionsSidebar({
           <Chip
             on={sources?.hud ?? true}
             label="HUD"
-            help="Free token from huduser.gov. Sets the Section 8 rent, and the market rent when no ATTOM estimate exists."
+            help="Free token from huduser.gov. Sets the Section 8 rent, and the market rent when no property-level estimate exists."
           />
           <Chip
             on={sources?.attom ?? false}
-            label="ATTOM"
-            help="Paid property records: the actual tax bill, value estimate and rent estimate."
+            label="Property records"
+            help="Licensed property records: the actual tax bill, value estimate and rent estimate."
           />
           <Chip
             on={sources?.mashvisor ?? false}
-            label="Mashvisor"
-            help="Paid short-term rental data: occupancy, nightly rate and revenue. Without it there is no honest short-term scenario."
+            label="Short-term data"
+            help="Licensed short-term rental data: occupancy, nightly rate and revenue. Without it there is no honest short-term scenario."
           />
           <Chip
             on={sources?.countyData ?? false}

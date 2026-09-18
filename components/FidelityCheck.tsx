@@ -102,14 +102,14 @@ export default function FidelityCheck({
   }
   if (data.attom?.rentalAvm != null && src !== "rent AVM") {
     benchmarks.push({
-      label: "ATTOM automated rent estimate",
+      label: "Independent automated rent estimate",
       value: data.attom.rentalAvm,
     });
   }
   const mvMedian = result?.traditionalRates?.byBedroom?.[beds];
   if (mvMedian != null) {
     benchmarks.push({
-      label: `Mashvisor median for this ZIP code${
+      label: `Market-data median for this ZIP code${
         result?.traditionalRates?.sampleCount
           ? ` · ${result.traditionalRates.sampleCount} sampled`
           : ""
@@ -126,7 +126,7 @@ export default function FidelityCheck({
   const hood = result?.neighborhoodHistorical;
   if (hood?.averages?.[beds] != null) {
     benchmarks.push({
-      label: `${hood.neighborhoodName ?? "Neighborhood"} average · Mashvisor`,
+      label: `${hood.neighborhoodName ?? "Neighborhood"} average · market data`,
       value: hood.averages[beds]!,
     });
   }
@@ -302,7 +302,7 @@ export default function FidelityCheck({
       {hood && hood.months.length > 0 && (
         <details className="mt-2 text-[12.5px] text-[#4a423a]">
           <summary className="cursor-pointer text-label">
-            {hood.neighborhoodName ?? "Neighborhood"} rent history ({bedrooms} BR, Mashvisor)
+            {hood.neighborhoodName ?? "Neighborhood"} rent history ({bedrooms} BR)
           </summary>
           <ul className="mt-1 flex flex-col gap-[2px]">
             {hood.months.slice(-12).map((m, i) => (

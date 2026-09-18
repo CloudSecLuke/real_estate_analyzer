@@ -509,14 +509,16 @@ export default function Home() {
   // flight; keys that are not configured render "skipped · no key".
   const steps = useMemo(
     () => [
-      { label: "Finding the property…", src: "Census", on: true },
-      { label: "Checking comparable sales…", src: "ATTOM", on: sources?.attom ?? false },
-      { label: "Estimating market rent…", src: "ATTOM", on: sources?.attom ?? false },
+      // Capability labels only — commercial vendor names never render in
+      // the product UI (government sources like HUD are fine to show).
+      { label: "Finding the property…", src: "public records", on: true },
+      { label: "Checking comparable sales…", src: "sales data", on: sources?.attom ?? false },
+      { label: "Estimating market rent…", src: "rent data", on: sources?.attom ?? false },
       { label: "Checking Section 8 potential…", src: "HUD", on: sources?.hud ?? true },
-      { label: "Checking property taxes…", src: "ATTOM", on: sources?.attom ?? false },
-      { label: "Testing short-term demand…", src: "Mashvisor", on: sources?.mashvisor ?? false },
-      { label: "Modeling financing…", src: "local", on: true },
-      { label: "Penciling the deal…", src: "local", on: true },
+      { label: "Checking property taxes…", src: "county data", on: sources?.attom ?? false },
+      { label: "Testing short-term demand…", src: "market data", on: sources?.mashvisor ?? false },
+      { label: "Modeling financing…", src: "PropPencil", on: true },
+      { label: "Penciling the deal…", src: "PropPencil", on: true },
     ],
     [sources]
   );
@@ -2451,8 +2453,8 @@ export default function Home() {
               an estimate from public data — HUD Fair Market Rents, FEMA flood
               maps, the Census geocoder, Census county data (taxes, rents,
               vacancy, population), BLS unemployment and the FRED mortgage
-              average — plus ATTOM property records and Mashvisor short-term
-              data where a key is configured. PropPencil estimates; it does not
+              average — plus licensed property-record and short-term-rental data
+              providers where configured. PropPencil estimates; it does not
               pretend to know the future. Verify rents with local comparable
               rentals, taxes with the county auditor and insurance with real
               quotes before making an offer. Not professional advice.
