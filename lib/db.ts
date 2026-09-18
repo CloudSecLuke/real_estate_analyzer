@@ -43,11 +43,14 @@ export async function saveUserState(
   username: string,
   state: UserState
 ): Promise<void> {
+  // Server-side cap (Phase 5): history grows one row per pencil forever —
+  // keep the most recent 200 regardless of what the client sends.
+  const history = state.history.slice(0, 200);
   await getSql()`
     INSERT INTO user_state (username, pins, assumptions, history, searches, updated_at)
     VALUES (${username}, ${JSON.stringify(state.pins)}::jsonb,
             ${state.assumptions ? JSON.stringify(state.assumptions) : null}::jsonb,
-            ${JSON.stringify(state.history)}::jsonb,
+            ${JSON.stringify(history)}::jsonb,
             ${JSON.stringify(state.searches)}::jsonb,
             now())
     ON CONFLICT (username) DO UPDATE

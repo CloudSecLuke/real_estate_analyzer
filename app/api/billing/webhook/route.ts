@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { getStripe } from "@/lib/stripe";
 import { applySubscription, findUsernameByCustomer } from "@/lib/users";
+import { sql } from "@/lib/sql";
 
 // Stripe webhook: keeps entitlements in sync with subscription state.
 // Public route (signature-verified), exempted from the auth proxy.
@@ -20,6 +21,23 @@ export async function POST(req: NextRequest) {
     event = stripe.webhooks.constructEvent(await req.text(), signature, secret);
   } catch {
     return NextResponse.json({ error: "bad signature" }, { status: 400 });
+  }
+
+  // Idempotency (Phase 5): record the event id; a replayed delivery is
+  // acknowledged without reprocessing.
+  try {
+    const fresh = (await sql()`
+      INSERT INTO stripe_events (id, type) VALUES (${event.id}, ${event.type})
+      ON CONFLICT (id) DO NOTHING RETURNING id
+    `) as unknown[];
+    if (fresh.length === 0) {
+      return NextResponse.json({ received: true, duplicate: true });
+    }
+  } catch (err) {
+    // If we can't record the event we also can't guarantee processing —
+    // 500 so Stripe retries later.
+    console.error("stripe_event_record_failed", err);
+    return NextResponse.json({ error: "db unavailable" }, { status: 500 });
   }
 
   try {
@@ -69,9 +87,12 @@ export async function POST(req: NextRequest) {
         break;
       }
     }
-  } catch {
-    // webhook handlers must not throw at Stripe; state will re-sync on
-    // the next event
+  } catch (err) {
+    // A DB write failure means the entitlement did NOT sync — return 500
+    // so Stripe retries, and drop the event id so the retry reprocesses.
+    console.error("stripe_webhook_apply_failed", event.type, err);
+    await sql()`DELETE FROM stripe_events WHERE id = ${event.id}`.catch(() => {});
+    return NextResponse.json({ error: "processing failed" }, { status: 500 });
   }
   return NextResponse.json({ received: true });
 }

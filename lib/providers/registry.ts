@@ -41,8 +41,10 @@ export const providerFlags = {
 /** Priority per capability — first configured provider wins, rest are
  *  fallbacks (spec §51). Overridable via PROVIDER_PRIORITY_JSON env. */
 const DEFAULT_PRIORITY: Record<Capability, string[]> = {
-  address: ["regrid", "mock"],
-  parcel: ["regrid", "mock"],
+  // Regrid is parked (Phase 5): owned typeahead serves our deep market;
+  // re-enable Regrid per-capability via PROVIDER_PRIORITY_JSON if needed.
+  address: ["owned", "mock"],
+  parcel: ["mock"],
   property: ["rentcast", "attom", "mock"],
   listing: ["mls", "rentcast", "mock"],
   rental: ["rentcast", "attom", "mock"],
@@ -65,6 +67,10 @@ export function providerPriority(): Record<Capability, string[]> {
 // lets adapters read env at call time (works in every deploy environment).
 async function loadAdapters(): Promise<Record<string, Partial<AdapterSet>>> {
   const out: Record<string, Partial<AdapterSet>> = { mock: mockProviders };
+  {
+    const { ownedProviders } = await import("./ownedAddress");
+    out.owned = ownedProviders;
+  }
   if (providerFlags.regrid()) {
     const { regridProviders } = await import("./regrid");
     out.regrid = regridProviders;
