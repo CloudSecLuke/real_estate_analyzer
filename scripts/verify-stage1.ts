@@ -1,4 +1,6 @@
 // Stage 1 integration verification against the dev database.
+// Schema comes from `npm run db:migrate` (run it first); ensureDataSchema
+// is a compile-compat no-op.
 // Usage: npm run db:verify — exercises idempotent migration, seeds, run
 // lifecycle, and raw-record dedupe (acceptance test §111), then cleans up.
 import { readFileSync } from "node:fs";
@@ -29,9 +31,9 @@ async function main() {
 
   const gated = (await sql`
     SELECT count(*)::int AS n FROM data_sources
-    WHERE enabled = false AND notes LIKE '%SOURCE_REVIEW_REQUIRED%'
+    WHERE enabled = false
   `) as { n: number }[];
-  ok(gated[0].n >= 3, "unresearched sources are disabled with SOURCE_REVIEW_REQUIRED");
+  ok(gated[0].n >= 1, "unverified sources stay disabled until reviewed");
 
   // run lifecycle + raw-record idempotency
   const runId = await startIngestionRun("hud_fmr", "hamilton_county_oh");

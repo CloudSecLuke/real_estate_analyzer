@@ -1,21 +1,25 @@
-// Hamilton County parcel ingestion runner.
-// Usage: npm run data:ingest:hamilton -- --limit 100   (omit limit = full)
-import { readFileSync } from "node:fs";
+// Hamilton County CAGIS centroid sweep (centroids ONLY — facts come from
+// npm run data:ingest:hc-auditor). Usage:
+//   npm run data:ingest:hamilton              # full sweep
+//   npm run data:ingest:hamilton -- --limit 5000
+import { existsSync, readFileSync } from "node:fs";
 
-for (const line of readFileSync(".env.local", "utf8").split("\n")) {
-  const m = line.match(/^([A-Z_0-9]+)="?([^"]*)"?$/);
-  if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+if (existsSync(".env.local")) {
+  for (const line of readFileSync(".env.local", "utf8").split("\n")) {
+    const m = line.match(/^([A-Z_0-9]+)="?([^"]*)"?$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+  }
 }
 
-import { ingestHamiltonParcels } from "../lib/data/providers/hamilton/parcels";
+import { ingestHamiltonCentroids } from "../lib/data/providers/hamilton/parcels";
 
 async function main() {
-  const limitArg = process.argv.indexOf("--limit");
-  const maxRecords = limitArg >= 0 ? Number(process.argv[limitArg + 1]) : undefined;
-  const offsetArg = process.argv.indexOf("--offset");
-  const startOffset = offsetArg >= 0 ? Number(process.argv[offsetArg + 1]) : undefined;
-  console.log(`ingesting Hamilton County parcels${maxRecords ? ` (limit ${maxRecords})` : " (full)"}...`);
-  const r = await ingestHamiltonParcels({ maxRecords, startOffset });
+  const i = process.argv.indexOf("--limit");
+  const maxRecords = i >= 0 ? Number(process.argv[i + 1]) : undefined;
+  const o = process.argv.indexOf("--offset");
+  const startOffset = o >= 0 ? Number(process.argv[o + 1]) : undefined;
+  console.log(`sweeping CAGIS centroids${maxRecords ? ` (limit ${maxRecords})` : ""}${startOffset ? ` from offset ${startOffset}` : ""}...`);
+  const r = await ingestHamiltonCentroids({ maxRecords, startOffset });
   console.log(JSON.stringify(r, null, 2));
 }
 

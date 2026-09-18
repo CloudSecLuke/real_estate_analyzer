@@ -1,199 +1,193 @@
-import { dataSql, ensureDataSchema } from "@/lib/data/schema";
-import {
-  assertSourceFields,
-  finishIngestionRun,
-  IngestError,
-  startIngestionRun,
-  storeRawRecord,
-} from "@/lib/data/ingest";
-import { resolveProperty, normalizeParcelId } from "@/lib/data/matching/propertyMatcher";
+import { Client } from "pg";
+import { databaseUrl } from "@/lib/dbUrl";
+import { IngestError } from "@/lib/data/ingest";
+import { normalizeParcelId } from "@/lib/data/matching/propertyMatcher";
 
-// Hamilton County parcel ingestion (PROP-39; spec §20). Source: the CAGIS
-// Open Data "Hamilton County Parcels" ArcGIS feature service — endpoint and
-// license live in the data_sources row, not in code. License reviewed
-// 2026-09-15: as-is warranty disclaimer, no use restriction found in
-// licenseInfo (docs/data-sources.md). One layer carries parcel ids, situs
-// address, owner, assessor market values, last sale, acreage.
+// Hamilton County CAGIS parcels — CENTROIDS ONLY (CLAUDE_CODE_BRIEF Phase 2
+// step 7). Property FACTS come from the Auditor bulk exports
+// (scripts/ingest-hamilton-auditor.ts); this provider exists solely to give
+// those properties coordinates: properties.latitude/longitude/geom and
+// property_parcels.centroid. CAGIS AUDPCLID (11 digits) is the prefix of
+// the auditor's 13-digit parcel number (2-digit unit suffix), so the join
+// is on left(canonical_parcel_id, 11) — one centroid serves every unit on
+// the parcel. Batches of
+// 1000 with ONE multi-row statement per page over pg — no per-record round
+// trips, no raw payload storage, no data_points writes.
 
 export const SOURCE_ID = "hamilton_county_parcels";
 export const MARKET_ID = "hamilton_county_oh";
-const PARSER_VERSION = "hamilton-parcels-1.0.0";
 const PAGE_SIZE = 1000;
 
 interface ArcgisFeature {
-  attributes: Record<string, unknown>;
+  attributes: { AUDPCLID?: unknown; PARCELID?: unknown };
   centroid?: { x: number; y: number };
 }
 
-async function serviceUrl(): Promise<string> {
-  await ensureDataSchema();
-  const rows = (await dataSql()`
-    SELECT api_url, enabled FROM data_sources WHERE id = ${SOURCE_ID}
-  `) as { api_url: string | null; enabled: boolean }[];
-  if (!rows[0]?.enabled) {
+async function serviceUrl(client: Client): Promise<string> {
+  const r = await client.query(
+    "SELECT api_url, enabled FROM data_sources WHERE id = $1",
+    [SOURCE_ID]
+  );
+  if (!r.rows[0]?.enabled) {
     throw new IngestError("forbidden", `${SOURCE_ID} is disabled in data_sources`);
   }
-  if (!rows[0].api_url) {
+  if (!r.rows[0].api_url) {
     throw new IngestError("forbidden", `${SOURCE_ID} has no api_url configured`);
   }
-  return rows[0].api_url;
+  return r.rows[0].api_url;
 }
 
-async function fetchPage(base: string, offset: number, limit: number): Promise<ArcgisFeature[]> {
+async function fetchPage(base: string, offset: number): Promise<ArcgisFeature[]> {
   const params = new URLSearchParams({
     where: "1=1",
-    outFields: "*",
+    outFields: "AUDPCLID,PARCELID",
     returnGeometry: "false",
     returnCentroid: "true",
     outSR: "4326",
     resultOffset: String(offset),
-    resultRecordCount: String(limit),
+    resultRecordCount: String(PAGE_SIZE),
     f: "json",
   });
-  const res = await fetch(`${base}/query?${params}`);
-  if (res.status === 429) throw new IngestError("rate_limited", "arcgis 429");
-  if (!res.ok) throw new IngestError("temporary_failure", `arcgis ${res.status}`);
-  const json = (await res.json()) as { features?: ArcgisFeature[]; error?: { message?: string } };
-  if (json.error) throw new IngestError("malformed_response", json.error.message ?? "arcgis error");
-  return json.features ?? [];
+  // Native fetch has NO default timeout — a dropped connection hangs the
+  // sweep forever (observed at ~page 102). Bounded timeout + one retry.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const res = await fetch(`${base}/query?${params}`, {
+        signal: AbortSignal.timeout(90_000),
+      });
+      if (res.status === 429) throw new IngestError("rate_limited", "arcgis 429");
+      if (!res.ok) throw new IngestError("temporary_failure", `arcgis ${res.status}`);
+      const json = (await res.json()) as { features?: ArcgisFeature[]; error?: { message?: string } };
+      if (json.error) throw new IngestError("malformed_response", json.error.message ?? "arcgis error");
+      return json.features ?? [];
+    } catch (err) {
+      if (attempt >= 3 || err instanceof IngestError) throw err;
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+    }
+  }
 }
 
-function str(v: unknown): string | null {
-  const s = typeof v === "string" ? v.trim() : v != null ? String(v) : "";
-  return s === "" ? null : s;
-}
-
-function situsAddress(a: Record<string, unknown>): string | null {
-  const parts = [str(a.ADDRNO), str(a.LOC_ST_DIR), str(a.ADDRST), str(a.ADDRSF)].filter(Boolean);
-  return parts.length >= 2 ? parts.join(" ") : null;
-}
-
-export interface HamiltonIngestResult {
+export interface CentroidIngestResult {
   runId: string;
+  pages: number;
   seen: number;
-  inserted: number;
-  updated: number;
-  unchanged: number;
-  failed: number;
-  propertiesTouched: number;
+  propertiesUpdated: number;
+  parcelsUpserted: number;
 }
 
-/** Ingest Hamilton County parcels. `maxRecords` bounds the run (smoke
- *  tests / staged backfills); omit for a full sweep. Safe to re-run. */
-export async function ingestHamiltonParcels(opts?: {
+/** Sweep the CAGIS layer and attach centroids to canonical properties.
+ *  Idempotent; safe to re-run monthly after the auditor load. */
+export async function ingestHamiltonCentroids(opts?: {
   maxRecords?: number;
   startOffset?: number;
-}): Promise<HamiltonIngestResult> {
-  const base = await serviceUrl();
-  const runId = await startIngestionRun(SOURCE_ID, MARKET_ID);
-  const sql = dataSql();
-  let seen = 0, inserted = 0, updated = 0, unchanged = 0, failed = 0, propertiesTouched = 0;
-  let offset = opts?.startOffset ?? 0;
-  const max = opts?.maxRecords ?? Number.POSITIVE_INFINITY;
-
+}): Promise<CentroidIngestResult> {
+  const client = new Client({ connectionString: databaseUrl() });
+  await client.connect();
   try {
-    while (seen < max) {
-      const page = await fetchPage(base, offset, Math.min(PAGE_SIZE, max - seen));
-      if (page.length === 0) break;
-      // schema-change guard on the first record of each run (spec §105)
-      assertSourceFields(page[0].attributes, ["PARCELID", "ADDRST", "OWNNM1"], SOURCE_ID);
+    const base = await serviceUrl(client);
+    const run = await client.query(
+      `INSERT INTO ingestion_runs (source_id, market_id, metadata)
+       VALUES ($1, $2, '{"mode":"centroids_only"}') RETURNING id`,
+      [SOURCE_ID, MARKET_ID]
+    );
+    const runId: string = run.rows[0].id;
 
-      for (const f of page) {
-        seen++;
-        try {
-          const a = f.attributes;
-          const parcelId = str(a.AUDPCLID) ?? str(a.PARCELID);
-          if (!parcelId) { failed++; continue; }
-
-          const stored = await storeRawRecord({
-            sourceId: SOURCE_ID,
-            recordType: "parcel",
-            externalRecordId: normalizeParcelId(parcelId),
-            payload: a,
-            ingestionRunId: runId,
-            parserVersion: PARSER_VERSION,
-          });
-          if (stored.outcome === "inserted") inserted++;
-          else if (stored.outcome === "updated") updated++;
-          else { unchanged++; continue; } // unchanged → nothing downstream to redo
-
-          const situs = situsAddress(a);
-          const lat = f.centroid?.y, lon = f.centroid?.x;
-          const resolution = await resolveProperty({
-            marketId: MARKET_ID,
-            parcelId,
-            address: situs ? `${situs}, Cincinnati, OH` : undefined,
-            latitude: lat,
-            longitude: lon,
-            createIfMissing: true,
-          });
-          const propertyId = resolution.propertyId ?? null;
-          if (propertyId) propertiesTouched++;
-
-          await sql`
-            INSERT INTO property_parcels
-              (property_id, source_id, source_parcel_id, normalized_parcel_id, apn,
-               situs_address, owner, land_use, acreage, centroid, source_updated_at)
-            VALUES
-              (${propertyId}, ${SOURCE_ID}, ${parcelId}, ${normalizeParcelId(parcelId)},
-               ${str(a.PARCELID)}, ${situs}, ${str(a.OWNNM1)}, ${str(a.CLASS)},
-               ${a.ACREDEED != null ? Number(a.ACREDEED) : null},
-               ${lat != null && lon != null ? `SRID=4326;POINT(${lon} ${lat})` : null},
-               now())
-            ON CONFLICT (source_id, source_parcel_id) DO UPDATE SET
-              property_id = EXCLUDED.property_id,
-              situs_address = EXCLUDED.situs_address,
-              owner = EXCLUDED.owner,
-              land_use = EXCLUDED.land_use,
-              acreage = EXCLUDED.acreage,
-              centroid = EXCLUDED.centroid,
-              retrieved_at = now()
-          `;
-
-          // public-record data points with provenance (spec §12)
-          if (propertyId) {
-            const points: Array<[string, unknown, string]> = [];
-            if (str(a.OWNNM1)) points.push(["owner_name", str(a.OWNNM1), "string"]);
-            if (a.MKTLND != null || a.MKTIMP != null) {
-              points.push(["assessed_market_value", Number(a.MKTLND ?? 0) + Number(a.MKTIMP ?? 0), "number"]);
-            }
-            if (a.SALAMT != null && Number(a.SALAMT) > 0) points.push(["last_sale_price", Number(a.SALAMT), "number"]);
-            if (str(a.SALDAT)) points.push(["last_sale_date", str(a.SALDAT), "string"]);
-            if (a.ACREDEED != null) points.push(["lot_size_acres", Number(a.ACREDEED), "number"]);
-            for (const [field, value, vtype] of points) {
-              await sql`
-                UPDATE data_points SET is_current = false
-                WHERE property_id = ${propertyId}::uuid AND field_name = ${field}
-                  AND source_id = ${SOURCE_ID} AND is_current = true
-              `;
-              await sql`
-                INSERT INTO data_points
-                  (property_id, field_name, value, value_type, value_class,
-                   source_id, source_record_id, confidence, method)
-                VALUES
-                  (${propertyId}::uuid, ${field}, ${JSON.stringify(value)}::jsonb, ${vtype},
-                   'verified', ${SOURCE_ID}, ${stored.id}::uuid, 0.92, 'public_record')
-              `;
-            }
-          }
-        } catch (err) {
-          failed++;
-          if (err instanceof IngestError && err.kind === "source_schema_changed") throw err;
-          console.error("hamilton_parcel_record_failed", err instanceof Error ? err.message : err);
+    let offset = opts?.startOffset ?? 0, pages = 0, seen = 0, propertiesUpdated = 0, parcelsUpserted = 0;
+    const max = opts?.maxRecords ?? Number.POSITIVE_INFINITY;
+    try {
+      while (seen < max) {
+        const feats = await fetchPage(base, offset);
+        if (feats.length === 0) break;
+        if (pages === 0 && feats[0] && !("AUDPCLID" in feats[0].attributes)) {
+          throw new IngestError("source_schema_changed", "AUDPCLID missing from ArcGIS response");
         }
-      }
-      offset += page.length;
-      if (page.length < PAGE_SIZE) break;
-    }
+        pages++;
 
-    await finishIngestionRun(runId, failed > 0 ? "partial" : "completed",
-      { seen, inserted, updated, skipped: unchanged, failed },
-      { cursor: String(offset) });
-    return { runId, seen, inserted, updated, unchanged, failed, propertiesTouched };
-  } catch (err) {
-    await finishIngestionRun(runId, "failed",
-      { seen, inserted, updated, skipped: unchanged, failed },
-      { cursor: String(offset), error: err instanceof Error ? err.message : "unknown" });
-    throw err;
+        const rows: { pid: string; raw: string; lat: number; lon: number }[] = [];
+        const seenIds = new Set<string>();
+        for (const f of feats) {
+          seen++;
+          const raw = String(f.attributes.AUDPCLID ?? f.attributes.PARCELID ?? "").trim();
+          const lat = f.centroid?.y, lon = f.centroid?.x;
+          if (!raw || lat == null || lon == null) continue;
+          const pid = normalizeParcelId(raw);
+          if (seenIds.has(pid)) continue; // duplicate source records occur
+          seenIds.add(pid);
+          rows.push({ pid, raw, lat, lon });
+        }
+        if (rows.length > 0) {
+          // one VALUES list per page for both statements
+          const values: string[] = [];
+          const params: unknown[] = [];
+          rows.forEach((r, i) => {
+            const b = i * 4;
+            values.push(`($${b + 1}, $${b + 2}, $${b + 3}::double precision, $${b + 4}::double precision)`);
+            params.push(r.pid, r.raw, r.lat, r.lon);
+          });
+          const v = `(VALUES ${values.join(",")}) AS v(pid, raw_id, lat, lon)`;
+
+          const upd = await client.query(
+            `UPDATE properties p SET
+               latitude = v.lat, longitude = v.lon,
+               geom = ST_SetSRID(ST_MakePoint(v.lon, v.lat), 4326),
+               updated_at = now()
+             FROM ${v}
+             WHERE p.market_id = '${MARKET_ID}' AND left(p.canonical_parcel_id, 11) = v.pid
+               AND (p.latitude IS DISTINCT FROM v.lat OR p.longitude IS DISTINCT FROM v.lon)`,
+            params
+          );
+          propertiesUpdated += upd.rowCount ?? 0;
+
+          const ups = await client.query(
+            `INSERT INTO property_parcels
+               (property_id, source_id, source_parcel_id, normalized_parcel_id, centroid, retrieved_at)
+             SELECT p.id, '${SOURCE_ID}', v.raw_id, v.pid,
+                    ST_SetSRID(ST_MakePoint(v.lon, v.lat), 4326), now()
+             FROM ${v}
+             JOIN LATERAL (
+               SELECT id FROM properties
+               WHERE market_id = '${MARKET_ID}' AND left(canonical_parcel_id, 11) = v.pid
+               ORDER BY canonical_parcel_id LIMIT 1
+             ) p ON true
+             ON CONFLICT (source_id, source_parcel_id) DO UPDATE SET
+               property_id = EXCLUDED.property_id,
+               normalized_parcel_id = EXCLUDED.normalized_parcel_id,
+               centroid = EXCLUDED.centroid,
+               retrieved_at = now()`,
+            params
+          );
+          parcelsUpserted += ups.rowCount ?? 0;
+        }
+        offset += feats.length;
+        if (feats.length < PAGE_SIZE) break;
+      }
+
+      await client.query(
+        `UPDATE ingestion_runs SET completed_at = now(), status = 'completed',
+           records_seen = $2, records_updated = $3, cursor = $4 WHERE id = $1`,
+        [runId, seen, propertiesUpdated, String(offset)]
+      );
+      await client.query(
+        `UPDATE data_sources SET last_successful_ingestion_at = now(),
+           last_attempted_ingestion_at = now(), last_error = NULL, updated_at = now()
+         WHERE id = $1`,
+        [SOURCE_ID]
+      );
+      return { runId, pages, seen, propertiesUpdated, parcelsUpserted };
+    } catch (err) {
+      await client.query(
+        `UPDATE ingestion_runs SET completed_at = now(), status = 'failed',
+           records_seen = $2, cursor = $3 WHERE id = $1`,
+        [runId, seen, String(offset)]
+      ).catch(() => {});
+      await client.query(
+        `UPDATE data_sources SET last_attempted_ingestion_at = now(),
+           last_error = $2, updated_at = now() WHERE id = $1`,
+        [SOURCE_ID, err instanceof Error ? err.message.slice(0, 500) : "unknown"]
+      ).catch(() => {});
+      throw err;
+    }
+  } finally {
+    await client.end();
   }
 }

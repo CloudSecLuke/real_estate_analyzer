@@ -182,29 +182,29 @@ async function loadTax(client: Client, path: string, asOf: string) {
     const up = await client.query(`
       INSERT INTO auditor_parcels
         (parcel_number, market_id, prop_class_code, class_description, appraisal_area,
-         area_description, house_number, house_number_raw, street_direction, street_name, street_suffix,
+         house_number, house_number_raw, street_direction, street_name, street_suffix,
          situs_address, tax_district, tax_district_desc, school_district_desc,
-         deeded_acreage, owner_name_1, mailing_state, rental_registered, homestead,
+         deeded_acreage, mailing_state, rental_registered, homestead,
          foreclosure_flag, bor_flag, active, transfer_date, sale_amount, sale_type,
          market_land_value, market_impr_value, total_market_value, annual_taxes,
          current_re_taxes, special_assessments, content_hash, file_as_of, loaded_at)
       SELECT parcel_number, $1, prop_class_code, class_description, appraisal_area,
-         area_description, house_number, house_number_raw, street_direction, street_name, street_suffix,
+         house_number, house_number_raw, street_direction, street_name, street_suffix,
          NULLIF(concat_ws(' ', house_number_raw, street_direction, street_name, street_suffix), ''),
          tax_district, tax_district_desc, school_district_desc,
-         deeded_acreage, owner_name_1, mailing_state, rental_registered, homestead,
+         deeded_acreage, mailing_state, rental_registered, homestead,
          foreclosure_flag, bor_flag, active, transfer_date, sale_amount, sale_type,
          market_land_value, market_impr_value, total_market_value, annual_taxes,
          current_re_taxes, special_assessments, content_hash, $2::date, now()
       FROM stg_tax
       ON CONFLICT (parcel_number) DO UPDATE SET
         prop_class_code = EXCLUDED.prop_class_code, class_description = EXCLUDED.class_description,
-        appraisal_area = EXCLUDED.appraisal_area, area_description = EXCLUDED.area_description,
+        appraisal_area = EXCLUDED.appraisal_area,
         house_number = EXCLUDED.house_number, house_number_raw = EXCLUDED.house_number_raw, street_direction = EXCLUDED.street_direction,
         street_name = EXCLUDED.street_name, street_suffix = EXCLUDED.street_suffix,
         situs_address = EXCLUDED.situs_address, tax_district = EXCLUDED.tax_district,
         tax_district_desc = EXCLUDED.tax_district_desc, school_district_desc = EXCLUDED.school_district_desc,
-        deeded_acreage = EXCLUDED.deeded_acreage, owner_name_1 = EXCLUDED.owner_name_1,
+        deeded_acreage = EXCLUDED.deeded_acreage,
         mailing_state = EXCLUDED.mailing_state, rental_registered = EXCLUDED.rental_registered,
         homestead = EXCLUDED.homestead, foreclosure_flag = EXCLUDED.foreclosure_flag,
         bor_flag = EXCLUDED.bor_flag, active = EXCLUDED.active, transfer_date = EXCLUDED.transfer_date,
@@ -234,11 +234,12 @@ async function loadTax(client: Client, path: string, asOf: string) {
              WHEN p.prop_class_code IN (550,555) THEN 'condo'
              WHEN p.prop_class_code BETWEEN 401 AND 403 THEN 'multifamily'
              WHEN p.prop_class_code = 500 THEN 'vacant_land' ELSE 'other' END,
-        p.class_description, p.owner_name_1, round(p.deeded_acreage * 43560),
+        p.class_description, s.owner_name_1, round(p.deeded_acreage * 43560),
         round(p.current_re_taxes * 100), p.total_market_value::bigint * 100,
         p.transfer_date, NULLIF(p.sale_amount,0)::bigint * 100, p.rental_registered,
         $2, $3::date, now()
-      FROM auditor_parcels p WHERE p.market_id = $1 AND p.active
+      FROM auditor_parcels p JOIN stg_tax s ON s.parcel_number = p.parcel_number
+      WHERE p.market_id = $1 AND p.active
       ON CONFLICT (market_id, canonical_parcel_id) WHERE canonical_parcel_id IS NOT NULL
       DO UPDATE SET street_address = EXCLUDED.street_address, property_type = EXCLUDED.property_type,
         land_use = EXCLUDED.land_use, owner_name = EXCLUDED.owner_name,
