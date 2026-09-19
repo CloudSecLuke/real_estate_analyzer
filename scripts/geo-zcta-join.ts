@@ -1,7 +1,13 @@
 // Phase 3: ZIP + city for Hamilton County properties (the Auditor tax file
 // ships location_city/state/zip EMPTY on every row).
 //
-//   npm run data:geo:zcta
+//   npm run data:geo:zcta                       # Hamilton (default)
+//   npm run data:geo:zcta -- --market greene_county_oh \
+//     --envelope=-84.10,39.52,-83.60,39.98 --fill-only
+//
+// --fill-only: only set postal_code where it is NULL (keep county situs ZIPs,
+// which are more accurate than ZCTA). The tax-district city mapping runs for
+// Hamilton only.
 //
 // ZIP: Census TIGERweb ZCTA5 polygons (US Census Bureau, public domain)
 // intersecting the Hamilton County envelope → zcta_oh → one
@@ -22,8 +28,25 @@ import { databaseUrl } from "../lib/dbUrl";
 
 const SOURCE_ID = "census_tigerweb_zcta";
 const TIGERWEB = "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/PUMA_TAD_TAZ_UGA_ZCTA/MapServer";
-// Hamilton County OH envelope with margin (WGS84).
-const ENVELOPE = { xmin: -84.90, ymin: 38.95, xmax: -84.20, ymax: 39.40 };
+
+function cliArg(flag: string): string | undefined {
+  const eq = process.argv.find((a) => a.startsWith(`${flag}=`));
+  if (eq) return eq.slice(flag.length + 1);
+  const i = process.argv.indexOf(flag);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+const MARKET = cliArg("--market") ?? "hamilton_county_oh";
+const FILL_ONLY = process.argv.includes("--fill-only");
+// Hamilton County OH envelope with margin (WGS84) unless overridden.
+const envArg = cliArg("--envelope");
+const ENVELOPE = envArg
+  ? (() => {
+      const [xmin, ymin, xmax, ymax] = envArg.split(",").map(Number);
+      if ([xmin, ymin, xmax, ymax].some(Number.isNaN)) throw new Error("bad --envelope");
+      return { xmin, ymin, xmax, ymax };
+    })()
+  : { xmin: -84.90, ymin: 38.95, xmax: -84.20, ymax: 39.40 };
 
 // Municipal prefix → postal-style city name. Derived from the 109 distinct
 // tax_district_desc values in the 2026-08-31 file. Township prefixes are
@@ -160,10 +183,19 @@ async function main() {
     const zip = await client.query(`
       UPDATE properties p SET postal_code = z.zcta5, updated_at = now()
       FROM zcta_oh z
-      WHERE p.market_id = 'hamilton_county_oh' AND p.geom IS NOT NULL
+      WHERE p.market_id = $1 AND p.geom IS NOT NULL
         AND ST_Contains(z.geom, p.geom)
-        AND p.postal_code IS DISTINCT FROM z.zcta5`);
+        AND ${FILL_ONLY ? "p.postal_code IS NULL" : "p.postal_code IS DISTINCT FROM z.zcta5"}`,
+      [MARKET]);
     console.log(`postal_code set on ${zip.rowCount} properties`);
+
+    if (MARKET !== "hamilton_county_oh") {
+      const counts = await client.query(
+        `SELECT count(*) FILTER (WHERE postal_code IS NOT NULL) with_zip, count(*) total
+         FROM properties WHERE market_id = $1`, [MARKET]);
+      console.log("final:", JSON.stringify(counts.rows[0]));
+      return;
+    }
 
     // City mapping: every distinct district gets a row; unmapped → NULL.
     const districts = await client.query(

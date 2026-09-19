@@ -23,11 +23,16 @@ from the GitHub issue number). Labels: priority `P0`/`P1`/`P2` plus area
   db:migrate` against production is MANDATORY before any deploy that
   includes new migrations** — all lazy/runtime DDL is gone; the app
   assumes migrated tables exist. Migrations are idempotent and CI-tested.
-- Data loads are scripts, not request-path code: `npm run
-  data:ingest:hc-auditor -- --as-of <date>` (monthly, matches the
-  Auditor's "File current as of" date on revalue.asp), `npm run
-  data:ingest:hamilton` (CAGIS centroids, monthly, after the auditor
-  load), `npm run data:geo:zcta` (ZIP/city, after centroids).
+- Data loads are scripts, not request-path code. Hamilton (monthly):
+  `npm run data:ingest:hc-auditor -- --as-of <date>` (matches the
+  Auditor's "File current as of" date on revalue.asp), then `npm run
+  data:ingest:hamilton` (CAGIS centroids), then `npm run data:geo:zcta`
+  (ZIP/city). Greene (monthly): `npm run data:ingest:greene` (county
+  ArcGIS, facts incl. beds/taxes), then `npm run data:ingest:oh-centroids
+  -- --county Greene --market greene_county_oh` (GeOhio statewide layer —
+  the county endpoint suppresses geometry), then `npm run data:geo:zcta --
+  --market greene_county_oh --envelope=-84.10,39.52,-83.60,39.98
+  --fill-only` (only fills NULL ZIPs; county situs ZIPs win).
 - Stripe is **live mode** in the production env; the development env keeps
   sandbox test keys on purpose. Production values for Stripe are marked
   Sensitive in Vercel and cannot be pulled — verify changes functionally

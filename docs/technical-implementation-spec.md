@@ -138,3 +138,30 @@ production until the new engine replaces it.
   durable dataset.
 - Schema is managed exclusively by `migrations/` via `npm run db:migrate`
   (idempotent, CI-tested); all runtime DDL was removed.
+
+## Revision 2026-09-19 (second owned market: Greene County OH)
+
+- **Greene County (Dayton/WPAFB corridor) is owned market #2**
+  (`greene_county_oh`, FIPS 39057). Single source: the county's open
+  ArcGIS parcels layer (`greene_county_parcels`) carries full facts —
+  including **bedrooms** (which Hamilton lacks), baths, living area,
+  year built, annual tax bill, appraised value, sale + validity flag,
+  and situs city/ZIP. Residential filter `Class='RESIDENTIAL'`
+  (63,835 of 77,807 parcels). Loader:
+  `lib/data/providers/greene/parcels.ts`.
+- **Geometry comes from the GeOhio Statewide Parcels layer**
+  (`geohio_statewide_parcels`): the county MapServer suppresses all
+  geometry (`supportsReturningGeometry: None`). The statewide sweep
+  (`lib/data/providers/ohio/statewideCentroids.ts`) is county-generic —
+  it joins `normalizeParcelId(LocalParcelID)` to
+  `canonical_parcel_id` — and is the intended geometry path for future
+  Ohio counties (Montgomery next, pending a facts source).
+- **ZCTA join generalized**: `scripts/geo-zcta-join.ts` takes
+  `--market`, `--envelope`, and `--fill-only` (fill NULL ZIPs only —
+  county situs ZIPs are more accurate than ZCTA and are never
+  overwritten).
+- **The analyze short-circuit is market-generic**: `findOwnedFacts`
+  (`lib/analyses.ts`) joins `markets` on `county_fips` for any enabled
+  market; provenance copy derives from `markets.county`. Owned `beds`
+  flows into the result where the source provides it (Greene yes,
+  Hamilton stays NULL). The owned typeahead searches all owned markets.

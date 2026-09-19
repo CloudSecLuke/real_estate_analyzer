@@ -27,7 +27,7 @@ interface Row {
 }
 
 function display(r: Row): string {
-  return [r.street_address, r.city ?? "HAMILTON COUNTY", r.state, r.postal_code]
+  return [r.street_address, r.city, r.state, r.postal_code]
     .filter(Boolean)
     .join(", ");
 }
@@ -44,8 +44,7 @@ export const ownedAddressProvider: AddressProvider = {
              latitude, longitude, canonical_parcel_id,
              similarity(street_address, ${q}) AS sim
       FROM properties
-      WHERE market_id = 'hamilton_county_oh'
-        AND street_address ILIKE ${"%" + q + "%"}
+      WHERE street_address ILIKE ${"%" + q + "%"}
       ORDER BY sim DESC, street_address ASC
       LIMIT 8
     `) as Row[];

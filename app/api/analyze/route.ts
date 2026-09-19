@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { canPencil, recordPencil } from "@/lib/users";
 import { runWithCallLog } from "@/lib/providerCache";
-import { findHamiltonFacts, recordAnalysis } from "@/lib/analyses";
+import { findOwnedFacts, recordAnalysis } from "@/lib/analyses";
 import { FORMULA_VERSION } from "@/lib/metrics";
 import { getAttomRentalAvm } from "@/lib/attom";
 import { checkRateLimit, tooMany } from "@/lib/ratelimit";
@@ -77,14 +77,16 @@ export async function POST(req: NextRequest) {
     const street = addrParts[0] ?? "";
     const city = addrParts[1] ?? "";
 
-    // Hamilton short-circuit (Phase 4 step 5): if this address resolves to
-    // an owned auditor-backed property, its facts and tax bill come from
+    // Owned-market short-circuit (Phase 4 step 5): if this address resolves
+    // to an owned auditor-backed property, its facts and tax bill come from
     // PropPencil data — the ATTOM property/tax call is skipped entirely
-    // and ATTOM is used for the rental AVM only. Bedrooms stay NULL/user.
-    const hamiltonFacts =
-      property.countyFips === "39061"
-        ? await findHamiltonFacts(street, property.zip).catch(() => null)
-        : null;
+    // and ATTOM is used for the rental AVM only. Bedrooms come from the
+    // source where it carries them (Greene); otherwise NULL/user.
+    const ownedFacts = await findOwnedFacts(
+      street,
+      property.zip,
+      property.countyFips ?? null
+    ).catch(() => null);
 
     let fmr: FmrData | null = null;
     let fmrError: boolean | undefined;
@@ -95,7 +97,7 @@ export async function POST(req: NextRequest) {
     const [fmrResult, flood, attomResult, acsRent, tax, mashvisorResult, marketHealth] = await Promise.all([
       getFmr(property.countyFips, property.zip).catch((e: Error) => e),
       getFloodZone(property.lat, property.lon),
-      (hamiltonFacts
+      (ownedFacts
         ? getAttomRentalAvm(property.matchedAddress)
         : getAttomData(property.matchedAddress)
       ).catch((e: Error) => e),
@@ -146,19 +148,20 @@ export async function POST(req: NextRequest) {
     });
 
     let factsProvenance: string | undefined;
-    if (hamiltonFacts) {
+    if (ownedFacts) {
       attom = {
         ...(attom ?? {}),
-        baths: hamiltonFacts.baths ?? undefined,
-        sqft: hamiltonFacts.livingAreaSqft ?? undefined,
-        yearBuilt: hamiltonFacts.yearBuilt ?? undefined,
-        assessedValue: hamiltonFacts.assessedValue ?? undefined,
-        annualTaxAmount: hamiltonFacts.annualTaxes ?? undefined,
-        lastSalePrice: hamiltonFacts.lastSalePrice ?? undefined,
-        lastSaleDate: hamiltonFacts.lastSaleDate ?? undefined,
+        beds: ownedFacts.beds ?? undefined,
+        baths: ownedFacts.baths ?? undefined,
+        sqft: ownedFacts.livingAreaSqft ?? undefined,
+        yearBuilt: ownedFacts.yearBuilt ?? undefined,
+        assessedValue: ownedFacts.assessedValue ?? undefined,
+        annualTaxAmount: ownedFacts.annualTaxes ?? undefined,
+        lastSalePrice: ownedFacts.lastSalePrice ?? undefined,
+        lastSaleDate: ownedFacts.lastSaleDate ?? undefined,
       };
       attomError = undefined;
-      factsProvenance = `Hamilton County Auditor, file as of ${hamiltonFacts.factsAsOf ?? "latest load"}`;
+      factsProvenance = `${ownedFacts.county ?? "County"} County Auditor, file as of ${ownedFacts.factsAsOf ?? "latest load"}`;
     }
 
     const p: AnalyzeResponse = {

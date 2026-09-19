@@ -43,11 +43,13 @@ function isoDate(v: unknown): string {
   return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
 }
 
-export interface HamiltonFacts {
+export interface OwnedFacts {
   propertyId: string;
+  county: string | null; // markets.county, e.g. "Hamilton" — drives provenance copy
   streetAddress: string | null;
   city: string | null;
   postalCode: string | null;
+  beds: number | null; // NULL where the source omits bedrooms (Hamilton)
   livingAreaSqft: number | null;
   baths: number | null;
   yearBuilt: number | null;
@@ -59,24 +61,28 @@ export interface HamiltonFacts {
   factsAsOf: string | null;
 }
 
-/** Hamilton short-circuit lookup (Phase 4 step 5): geocoded street line →
- *  owned auditor-backed property. Exact normalized street match first,
- *  ZIP-scoped; the fuzzy matcher is deliberately NOT used here — a wrong
- *  bulk match is worse than a paid provider call. */
-export async function findHamiltonFacts(
+/** Owned-market short-circuit lookup (Phase 4 step 5): geocoded street line →
+ *  owned auditor-backed property in any enabled market matching the county.
+ *  Exact normalized street match first, ZIP-scoped; the fuzzy matcher is
+ *  deliberately NOT used here — a wrong bulk match is worse than a paid
+ *  provider call. Returns null when the county has no owned market. */
+export async function findOwnedFacts(
   streetLine: string,
   zip: string | null,
+  countyFips: string | null,
   runner: SqlRunner = sql()
-): Promise<HamiltonFacts | null> {
+): Promise<OwnedFacts | null> {
+  if (!countyFips) return null;
   const norm = streetLine.toUpperCase().replace(/\s+/g, " ").trim();
   const rows = (await runner`
-    SELECT p.id, p.street_address, p.city, p.postal_code,
-           p.living_area_sqft, p.baths, p.year_built,
+    SELECT p.id, m.county, p.street_address, p.city, p.postal_code,
+           p.beds, p.living_area_sqft, p.baths, p.year_built,
            p.annual_taxes_cents, p.assessed_value_cents,
            p.last_sale_date, p.last_sale_cents, p.rental_registered,
            p.facts_as_of
     FROM properties p
-    WHERE p.market_id = 'hamilton_county_oh'
+    JOIN markets m ON m.id = p.market_id AND m.enabled
+    WHERE m.county_fips = ${countyFips}
       AND p.street_address = ${norm}
       AND (${zip}::text IS NULL OR p.postal_code IS NULL OR p.postal_code = ${zip})
     LIMIT 2
@@ -85,6 +91,8 @@ export async function findHamiltonFacts(
   const r = rows[0];
   return {
     propertyId: String(r.id),
+    county: (r.county as string) ?? null,
+    beds: r.beds == null ? null : Number(r.beds),
     streetAddress: (r.street_address as string) ?? null,
     city: (r.city as string) ?? null,
     postalCode: (r.postal_code as string) ?? null,
