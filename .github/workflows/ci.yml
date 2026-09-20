@@ -29,7 +29,7 @@ jobs:
       # Service-container URL only — never a real connection string here.
       DATABASE_URL: postgresql://pencil:pencil@localhost:5432/proppencil_ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -47,7 +47,7 @@ jobs:
       # No real provider is contacted in CI; tests use fixed inputs.
       AUTH_SECRET: ci-dummy-secret-not-used-in-prod
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
