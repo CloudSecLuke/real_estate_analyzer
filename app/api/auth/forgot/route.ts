@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createResetToken } from "@/lib/users";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { checkRateLimit, ipKey, tooMany } from "@/lib/ratelimit";
+import { reportError } from "@/lib/reportError";
 
 // Always responds 200 with the same body — whether the username exists,
 // has an email, or is a founder — so the endpoint can't be used to
@@ -35,7 +36,14 @@ export async function POST(req: NextRequest) {
   }
 
   if (username) {
-    const reset = await createResetToken(username).catch(() => null);
+    // Report but stay silent to the caller (uniform 200) — a DB or email
+    // failure here must not reveal whether the account exists, but it also
+    // must not be invisible: a swallowed failure means a user who asked for
+    // a reset never got one.
+    const reset = await createResetToken(username).catch((err) => {
+      reportError(err, { event: "create_reset_token_failed", severity: "error" });
+      return null;
+    });
     if (reset) {
       const link = `${req.nextUrl.origin}/reset?token=${reset.token}`;
       await sendEmail({
@@ -47,7 +55,9 @@ export async function POST(req: NextRequest) {
           `Reset it here (link expires in 30 minutes):\n${link}\n\n` +
           `If you didn't ask for this, ignore this email — your password ` +
           `is unchanged.`,
-      });
+      }).catch((err) =>
+        reportError(err, { event: "reset_email_send_failed", severity: "error" })
+      );
     }
   }
 

@@ -5,6 +5,7 @@ import { findOwnedFacts, recordAnalysis } from "@/lib/analyses";
 import { FORMULA_VERSION } from "@/lib/metrics";
 import { getAttomRentalAvm } from "@/lib/attom";
 import { checkRateLimit, tooMany } from "@/lib/ratelimit";
+import { reportError } from "@/lib/reportError";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 import { geocodeAddress } from "@/lib/geocode";
 import { getFmr } from "@/lib/hud";
@@ -37,7 +38,11 @@ export async function POST(req: NextRequest) {
       rl.retryAfterSecs
     );
   }
-  const permission = await canPencil(user).catch(() => null);
+  const permission = await canPencil(user)
+    .catch((err) => {
+      reportError(err, { event: "can_pencil_failed", severity: "error", username: user });
+      return null;
+    });
   if (!permission) {
     return NextResponse.json(
       { error: "Could not check your plan — try again." },
@@ -143,8 +148,16 @@ export async function POST(req: NextRequest) {
       mashvisor = mashvisorResult;
     }
 
-    await recordPencil(user, permission.source).catch(() => {
-      // metering write failure must never break the analysis
+    await recordPencil(user, permission.source).catch((err) => {
+      // Metering write failure must never break the analysis — but it must
+      // not be silent: a swallowed failure here gives away a free/paid pencil
+      // that was never counted (revenue leak).
+      reportError(err, {
+        event: "record_pencil_failed",
+        severity: "alert",
+        username: user,
+        extra: { source: permission.source },
+      });
     });
 
     let factsProvenance: string | undefined;
@@ -192,7 +205,13 @@ export async function POST(req: NextRequest) {
       result: payload,
       formulaVersion: FORMULA_VERSION,
       providerCalls: calls,
-    }).catch((err) => console.error("record_analysis_failed", err));
+    }).catch((err) =>
+      reportError(err, {
+        event: "record_analysis_failed",
+        severity: "error",
+        username: user,
+      })
+    );
 
     return NextResponse.json(payload);
   } catch (e) {

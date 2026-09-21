@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import { getStripe } from "@/lib/stripe";
 import { applySubscription, findUsernameByCustomer } from "@/lib/users";
 import { sql } from "@/lib/sql";
+import { reportError } from "@/lib/reportError";
 
 // Stripe webhook: keeps entitlements in sync with subscription state.
 // Public route (signature-verified), exempted from the auth proxy.
@@ -36,7 +37,11 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     // If we can't record the event we also can't guarantee processing —
     // 500 so Stripe retries later.
-    console.error("stripe_event_record_failed", err);
+    reportError(err, {
+      event: "stripe_event_record_failed",
+      severity: "alert",
+      extra: { stripeEventId: event.id, stripeEventType: event.type },
+    });
     return NextResponse.json({ error: "db unavailable" }, { status: 500 });
   }
 
@@ -90,8 +95,21 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     // A DB write failure means the entitlement did NOT sync — return 500
     // so Stripe retries, and drop the event id so the retry reprocesses.
-    console.error("stripe_webhook_apply_failed", event.type, err);
-    await sql()`DELETE FROM stripe_events WHERE id = ${event.id}`.catch(() => {});
+    reportError(err, {
+      event: "stripe_webhook_apply_failed",
+      severity: "alert",
+      extra: { stripeEventId: event.id, stripeEventType: event.type },
+    });
+    // If this cleanup fails, the event id stays recorded and Stripe's retry
+    // is deduped to a no-op — leaving a paid user stranded. That must not be
+    // silent: it is the failure that most needs an alert.
+    await sql()`DELETE FROM stripe_events WHERE id = ${event.id}`.catch((delErr) =>
+      reportError(delErr, {
+        event: "stripe_event_cleanup_failed",
+        severity: "alert",
+        extra: { stripeEventId: event.id, stripeEventType: event.type },
+      })
+    );
     return NextResponse.json({ error: "processing failed" }, { status: 500 });
   }
   return NextResponse.json({ received: true });
