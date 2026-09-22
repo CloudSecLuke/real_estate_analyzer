@@ -41,7 +41,8 @@ const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{2,29}$/;
 export async function createUser(
   username: string,
   password: string,
-  email: string | null
+  email: string | null,
+  signupIpHash: string | null = null
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const u = username.trim().toLowerCase();
   if (!USERNAME_RE.test(u)) {
@@ -60,8 +61,8 @@ export async function createUser(
     (await sql`SELECT 1 FROM users WHERE username = ${u}`) as unknown[];
   if (existing.length > 0) return { ok: false, error: "That username is taken." };
   await sql`
-    INSERT INTO users (username, email, password_hash)
-    VALUES (${u}, ${email}, ${hashPassword(password)})
+    INSERT INTO users (username, email, password_hash, signup_ip_hash)
+    VALUES (${u}, ${email}, ${hashPassword(password)}, ${signupIpHash})
   `;
   await sql`
     INSERT INTO entitlements (username) VALUES (${u})
@@ -242,7 +243,49 @@ export async function getEntitlement(username: string): Promise<Entitlement> {
 
 export type PencilPermission =
   | { allowed: true; source: "founder" | "plan" | "free" }
-  | { allowed: false; reason: "upgrade" | "quota" };
+  | { allowed: false; reason: "upgrade" | "quota" | "ip_capped" };
+
+// Free-tier abuse cap (PROP-13): at most this many free-tier accounts from a
+// single signup IP get their free pencil within a rolling week. The 4th+
+// account from that IP is asked to subscribe instead. Ranked by signup time
+// so the earlier, legitimate accounts are never retroactively blocked.
+export const FREE_PENCILS_PER_IP_WEEK = 3;
+const IP_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function allowlistedIpHashes(): Set<string> {
+  return new Set(
+    (process.env.FREE_PENCIL_IP_ALLOWLIST ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+}
+
+/** True when this user's free pencil should be withheld because too many
+ *  free-tier accounts already came from the same signup IP this week.
+ *  Fails OPEN (returns false) on any error or missing data — a check outage
+ *  must never wrongly deny a legitimate free pencil. */
+export async function freeTierBlocked(username: string): Promise<boolean> {
+  try {
+    const rows = (await getSql()`
+      SELECT signup_ip_hash, created_at FROM users WHERE username = ${username}
+    `) as { signup_ip_hash: string | null; created_at: string }[];
+    const me = rows[0];
+    if (!me?.signup_ip_hash) return false; // legacy/no-IP account — allow
+    if (allowlistedIpHashes().has(me.signup_ip_hash)) return false;
+    // Count accounts from the same IP created earlier, within the trailing
+    // week. >= the cap means this account is the 4th+ → block its free pencil.
+    const earlier = (await getSql()`
+      SELECT count(*)::int AS n FROM users
+      WHERE signup_ip_hash = ${me.signup_ip_hash}
+        AND created_at < ${me.created_at}
+        AND created_at > now() - ${`${IP_WEEK_MS / 1000} seconds`}::interval
+    `) as { n: number }[];
+    return (earlier[0]?.n ?? 0) >= FREE_PENCILS_PER_IP_WEEK;
+  } catch {
+    return false; // fail open
+  }
+}
 
 export async function canPencil(username: string): Promise<PencilPermission> {
   const ent = await getEntitlement(username);
@@ -252,9 +295,12 @@ export async function canPencil(username: string): Promise<PencilPermission> {
       ? { allowed: true, source: "plan" }
       : { allowed: false, reason: "quota" };
   }
-  return ent.freeRemaining > 0
-    ? { allowed: true, source: "free" }
-    : { allowed: false, reason: "upgrade" };
+  if (ent.freeRemaining > 0) {
+    return (await freeTierBlocked(username))
+      ? { allowed: false, reason: "ip_capped" }
+      : { allowed: true, source: "free" };
+  }
+  return { allowed: false, reason: "upgrade" };
 }
 
 export async function recordPencil(

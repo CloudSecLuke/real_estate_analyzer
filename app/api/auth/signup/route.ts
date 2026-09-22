@@ -34,7 +34,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const result = await createUser(username, password, email);
+  // Store the hashed signup IP so free pencils can be capped per IP/week
+  // (PROP-13). ipKey already returns a sha256 hash — no raw IP is stored.
+  const result = await createUser(username, password, email, ipKey(req));
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
