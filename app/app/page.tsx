@@ -231,14 +231,31 @@ interface BillingStatus {
   monthlyRemaining: number | null;
   billingConfigured?: boolean;
   limits?: { free: number; investorMonthly: number; investorPriceUsd: number };
+  pastDue?: boolean;
+  graceEndsAt?: string | null;
+  cancelAtPeriodEnd?: boolean;
+  currentPeriodEnd?: string | null;
+}
+
+function fmtDate(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function planLine(b: BillingStatus): string {
   if (b.plan === "founder") return "Founder · unlimited pencils";
-  if (b.plan === "investor")
+  if (b.plan === "investor") {
+    if (b.cancelAtPeriodEnd && b.currentPeriodEnd)
+      return `Investor until ${fmtDate(b.currentPeriodEnd)} · ${
+        b.monthlyRemaining ?? "—"
+      } pencils left`;
     return `Investor plan · ${b.monthlyRemaining ?? "—"} of ${
       b.limits?.investorMonthly ?? 100
     } pencils left this month`;
+  }
   const free = b.freeRemaining ?? 0;
   return free > 0
     ? `Free plan · ${free} free pencil${free === 1 ? "" : "s"} left`
@@ -296,12 +313,26 @@ function AccountMenu({
                 Upgrade — ${billing.limits?.investorPriceUsd ?? 19}/mo
               </button>
             )}
+            {billing.pastDue && (
+              <span className="text-[11px] leading-[1.45] text-negative">
+                Payment failed — update your card by {fmtDate(billing.graceEndsAt)} to
+                keep your plan.
+              </span>
+            )}
+            {billing.plan === "investor" && billing.cancelAtPeriodEnd && (
+              <button
+                onClick={onManageBilling}
+                className="cursor-pointer rounded-[7px] bg-pencil px-3 py-[6px] text-left text-[12px] font-bold text-ink hover:bg-pencil-dark"
+              >
+                Resubscribe
+              </button>
+            )}
             {billing.plan === "investor" && (
               <button
                 onClick={onManageBilling}
                 className="cursor-pointer rounded-[7px] border border-input-border bg-paper px-3 py-[6px] text-left text-[12px] font-semibold text-ink hover:border-ink"
               >
-                Manage billing
+                {billing.pastDue ? "Fix payment" : "Manage billing"}
               </button>
             )}
           </div>

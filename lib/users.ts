@@ -155,9 +155,20 @@ export interface Entitlement {
   freeRemaining: number;
   monthlyRemaining: number | null; // null = unlimited
   stripeCustomerId: string | null;
+  /** In the past_due grace window: keep full access, but prompt to fix payment. */
+  pastDue: boolean;
+  /** ISO instant the grace window ends (null unless pastDue). */
+  graceEndsAt: string | null;
+  /** Subscription set to end at period close — still active until then. */
+  cancelAtPeriodEnd: boolean;
+  /** ISO instant the current paid period ends (for "Investor until <date>"). */
+  currentPeriodEnd: string | null;
 }
 
 const PERIOD_MS = 31 * 24 * 60 * 60 * 1000;
+// past_due keeps full access for this long (dunning/Smart Retries window)
+// before the account drops to free. unpaid/canceled drop immediately.
+export const PAST_DUE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface EntRow {
   free_pencils_used: number;
@@ -166,12 +177,16 @@ interface EntRow {
   plan: string;
   plan_status: string;
   stripe_customer_id: string | null;
+  past_due_since: string | null;
+  cancel_at_period_end: boolean;
+  current_period_end: string | null;
 }
 
 async function getRow(username: string): Promise<EntRow | null> {
   const rows = (await getSql()`
     SELECT free_pencils_used, pencils_this_period, period_start, plan,
-           plan_status, stripe_customer_id
+           plan_status, stripe_customer_id, past_due_since,
+           cancel_at_period_end, current_period_end
     FROM entitlements WHERE username = ${username}
   `) as EntRow[];
   return rows[0] ?? null;
@@ -185,10 +200,20 @@ export async function getEntitlement(username: string): Promise<Entitlement> {
       freeRemaining: 0,
       monthlyRemaining: null,
       stripeCustomerId: null,
+      pastDue: false,
+      graceEndsAt: null,
+      cancelAtPeriodEnd: false,
+      currentPeriodEnd: null,
     };
   }
   const row = await getRow(username);
-  const active = row?.plan === "investor" && row.plan_status === "active";
+  // past_due keeps access during the grace window; unpaid/canceled do not.
+  const inGrace =
+    row?.plan_status === "past_due" &&
+    row.past_due_since != null &&
+    Date.now() - new Date(row.past_due_since).getTime() < PAST_DUE_GRACE_MS;
+  const active =
+    row?.plan === "investor" && (row.plan_status === "active" || inGrace);
   const periodExpired =
     row != null && Date.now() - new Date(row.period_start).getTime() > PERIOD_MS;
   const used = active && !periodExpired ? (row?.pencils_this_period ?? 0) : 0;
@@ -200,6 +225,18 @@ export async function getEntitlement(username: string): Promise<Entitlement> {
       ? Math.max(0, INVESTOR_MONTHLY_PENCILS - used)
       : null,
     stripeCustomerId: row?.stripe_customer_id ?? null,
+    pastDue: Boolean(inGrace),
+    graceEndsAt:
+      inGrace && row?.past_due_since
+        ? new Date(new Date(row.past_due_since).getTime() + PAST_DUE_GRACE_MS).toISOString()
+        : null,
+    cancelAtPeriodEnd: Boolean(active && row?.cancel_at_period_end),
+    // neon returns timestamptz as a Date — normalize to ISO so the type
+    // (and every consumer) sees a string, not a Date.
+    currentPeriodEnd:
+      active && row?.current_period_end
+        ? new Date(row.current_period_end).toISOString()
+        : null,
   };
 }
 
@@ -254,14 +291,24 @@ export async function applySubscription(args: {
   username: string;
   customerId: string;
   subscriptionId: string | null;
-  status: "active" | "canceled" | "past_due" | "none";
+  status: "active" | "canceled" | "past_due" | "unpaid" | "none";
+  cancelAtPeriodEnd?: boolean;
+  currentPeriodEnd?: string | null; // ISO
 }): Promise<void> {
+  // past_due_since starts the grace clock on first entry and clears on any
+  // other status, so a recovered payment resets the window cleanly.
   await getSql()`
     UPDATE entitlements
     SET plan = 'investor',
         plan_status = ${args.status},
         stripe_customer_id = ${args.customerId},
         stripe_subscription_id = ${args.subscriptionId},
+        past_due_since = CASE
+          WHEN ${args.status} = 'past_due' THEN COALESCE(past_due_since, now())
+          ELSE NULL
+        END,
+        cancel_at_period_end = ${args.cancelAtPeriodEnd ?? false},
+        current_period_end = ${args.currentPeriodEnd ?? null},
         updated_at = now()
     WHERE username = ${args.username}
   `;

@@ -73,20 +73,30 @@ export async function POST(req: NextRequest) {
           (sub.metadata?.username as string | undefined) ??
           (await findUsernameByCustomer(String(sub.customer)));
         if (username) {
+          // Keep unpaid distinct from past_due: past_due gets the grace
+          // window, unpaid (retries exhausted) drops to free immediately.
           const status =
             event.type === "customer.subscription.deleted" ||
             sub.status === "canceled"
               ? "canceled"
-              : sub.status === "past_due" || sub.status === "unpaid"
-                ? "past_due"
-                : sub.status === "active" || sub.status === "trialing"
-                  ? "active"
-                  : "none";
+              : sub.status === "unpaid"
+                ? "unpaid"
+                : sub.status === "past_due"
+                  ? "past_due"
+                  : sub.status === "active" || sub.status === "trialing"
+                    ? "active"
+                    : "none";
+          const periodEnd = (sub as { current_period_end?: number })
+            .current_period_end;
           await applySubscription({
             username,
             customerId: String(sub.customer),
             subscriptionId: sub.id,
             status,
+            cancelAtPeriodEnd: Boolean(sub.cancel_at_period_end),
+            currentPeriodEnd: periodEnd
+              ? new Date(periodEnd * 1000).toISOString()
+              : null,
           });
         }
         break;
