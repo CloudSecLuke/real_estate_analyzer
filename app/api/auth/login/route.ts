@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCredentials } from "@/lib/auth";
+import { getSessionVersion } from "@/lib/sessionVersion";
 import { checkRateLimit, ipKey, tooMany } from "@/lib/ratelimit";
 import {
   createSessionToken,
@@ -49,7 +50,8 @@ export async function POST(req: NextRequest) {
   }
 
   const res = NextResponse.json({ user: username });
-  res.cookies.set(SESSION_COOKIE, await createSessionToken(username), {
+  const version = await getSessionVersion(username);
+  res.cookies.set(SESSION_COOKIE, await createSessionToken(username, version), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

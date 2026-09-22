@@ -252,6 +252,7 @@ function AccountMenu({
   onUpgrade,
   onManageBilling,
   onSignOut,
+  onSignOutEverywhere,
 }: {
   user: string | null;
   persistent: boolean;
@@ -259,6 +260,7 @@ function AccountMenu({
   onUpgrade: () => void;
   onManageBilling: () => void;
   onSignOut: () => void;
+  onSignOutEverywhere: () => void;
 }) {
   if (!user) return null;
   const initials = user
@@ -309,6 +311,12 @@ function AccountMenu({
           className="cursor-pointer rounded-[7px] border border-input-border bg-paper px-3 py-[6px] text-left text-[12px] font-semibold text-negative hover:border-negative"
         >
           Sign out
+        </button>
+        <button
+          onClick={onSignOutEverywhere}
+          className="cursor-pointer rounded-[7px] px-3 py-[5px] text-left text-[11px] font-medium text-muted hover:text-negative"
+        >
+          Sign out of all devices
         </button>
       </div>
     </details>
@@ -501,6 +509,18 @@ export default function Home() {
 
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    window.location.href = "/login";
+  }
+
+  async function signOutEverywhere() {
+    if (
+      !window.confirm(
+        "Sign out of all devices? You'll be signed out here and everywhere else this account is logged in."
+      )
+    ) {
+      return;
+    }
+    await fetch("/api/auth/logout-all", { method: "POST" }).catch(() => {});
     window.location.href = "/login";
   }
 
@@ -868,7 +888,7 @@ export default function Home() {
           >
             {sidebarOpen ? "Close" : "Inputs"}
           </button>
-          <AccountMenu user={user} persistent={persistent} billing={billing} onUpgrade={startCheckout} onManageBilling={openPortal} onSignOut={signOut} />
+          <AccountMenu user={user} persistent={persistent} billing={billing} onUpgrade={startCheckout} onManageBilling={openPortal} onSignOut={signOut} onSignOutEverywhere={signOutEverywhere} />
         </div>
       </div>
       <div className={`${sidebarOpen ? "block" : "hidden"} lg:block`}>
@@ -1000,7 +1020,7 @@ export default function Home() {
               ))}
             </div>
           </details>
-          <AccountMenu user={user} persistent={persistent} billing={billing} onUpgrade={startCheckout} onManageBilling={openPortal} onSignOut={signOut} />
+          <AccountMenu user={user} persistent={persistent} billing={billing} onUpgrade={startCheckout} onManageBilling={openPortal} onSignOut={signOut} onSignOutEverywhere={signOutEverywhere} />
         </div>
 
         {error && (

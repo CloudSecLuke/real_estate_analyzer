@@ -1,5 +1,6 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { sql as getSql } from "@/lib/sql";
+import { isFounder, isUsersDbConfigured } from "@/lib/accounts";
 
 // Self-serve accounts + entitlements. The two founder accounts
 // (luke.miller / bart.miller) stay in env vars with unlimited use;
@@ -10,13 +11,9 @@ export const INVESTOR_MONTHLY_PENCILS = 100;
 export const INVESTOR_PRICE_USD = 19;
 export const INVESTOR_LOOKUP_KEY = "proppencil_investor_monthly";
 
-const FOUNDERS = new Set(["luke.miller", "bart.miller"]);
-export const isFounder = (u: string) => FOUNDERS.has(u);
-
-
-export function isUsersDbConfigured(): boolean {
-  return Boolean(process.env.DATABASE_URL);
-}
+// Re-export for existing import sites (edge-reachable code should import
+// these from @/lib/accounts directly to stay crypto-free).
+export { isFounder, isUsersDbConfigured };
 
 
 // Schema is managed by migrations (npm run db:migrate) — no runtime DDL.
@@ -128,8 +125,12 @@ export async function resetPassword(
   if (!username) {
     return { ok: false, error: "That reset link is invalid or has expired." };
   }
+  // Bump session_version so every other outstanding session for this user is
+  // revoked on next verify (PROP-6) — a reset should kick out a thief.
   await sql`
-    UPDATE users SET password_hash = ${hashPassword(newPassword)}
+    UPDATE users
+    SET password_hash = ${hashPassword(newPassword)},
+        session_version = session_version + 1
     WHERE username = ${username}
   `;
   return { ok: true, username };

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resetPassword } from "@/lib/users";
+import { getSessionVersion } from "@/lib/sessionVersion";
 import { checkRateLimit, ipKey, tooMany } from "@/lib/ratelimit";
 import {
   createSessionToken,
@@ -28,9 +29,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
-  // sign them straight in with the new password
+  // sign them straight in with the new password. resetPassword bumped the
+  // session version (revoking any other sessions), so mint against the fresh
+  // value — this browser stays in, everything else is logged out.
   const res = NextResponse.json({ user: result.username });
-  res.cookies.set(SESSION_COOKIE, await createSessionToken(result.username), {
+  const version = await getSessionVersion(result.username);
+  res.cookies.set(SESSION_COOKIE, await createSessionToken(result.username, version), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

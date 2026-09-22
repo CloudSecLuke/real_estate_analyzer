@@ -39,9 +39,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
-  // sign the new account straight in
+  // sign the new account straight in (fresh account → version 0)
   const res = NextResponse.json({ user: username });
-  res.cookies.set(SESSION_COOKIE, await createSessionToken(username), {
+  res.cookies.set(SESSION_COOKIE, await createSessionToken(username, 0), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
