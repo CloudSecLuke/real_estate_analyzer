@@ -235,6 +235,8 @@ interface BillingStatus {
   graceEndsAt?: string | null;
   cancelAtPeriodEnd?: boolean;
   currentPeriodEnd?: string | null;
+  hasEmail?: boolean;
+  emailVerified?: boolean;
 }
 
 function fmtDate(iso?: string | null): string {
@@ -415,7 +417,32 @@ export default function Home() {
       setBillingNote("Checkout cancelled — no charge was made.");
       window.history.replaceState(null, "", "/app");
     }
+    // Back from an email-verification link: ?verify=ok|failed
+    const v = new URLSearchParams(window.location.search).get("verify");
+    if (v === "ok") {
+      setBillingNote("Email verified — password recovery is on.");
+      setTimeout(refreshBilling, 500);
+      window.history.replaceState(null, "", "/app");
+    } else if (v === "failed") {
+      setBillingNote("That verification link is invalid or has expired.");
+      window.history.replaceState(null, "", "/app");
+    }
   }, []);
+
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifySent, setVerifySent] = useState(false);
+  async function resendVerification() {
+    if (verifyBusy) return;
+    setVerifyBusy(true);
+    try {
+      await fetch("/api/auth/verify-email", { method: "POST" });
+      setVerifySent(true);
+    } catch {
+      // best-effort; the banner stays so they can retry
+    } finally {
+      setVerifyBusy(false);
+    }
+  }
 
   async function startCheckout() {
     if (checkoutBusy) return;
@@ -1071,6 +1098,27 @@ export default function Home() {
             >
               ✕
             </button>
+          </div>
+        )}
+
+        {billing?.hasEmail && !billing.emailVerified && (
+          <div className="flex items-center justify-between gap-3 rounded-[8px] border border-border border-l-4 border-l-warn bg-card px-4 py-[12px]">
+            <span className="text-[12.5px] text-body">
+              Verify your email to enable password recovery.
+            </span>
+            {verifySent ? (
+              <span className="shrink-0 text-[12px] font-semibold text-positive">
+                Sent — check your inbox
+              </span>
+            ) : (
+              <button
+                onClick={resendVerification}
+                disabled={verifyBusy}
+                className="shrink-0 cursor-pointer rounded-[6px] border border-input-border bg-paper px-3 py-[5px] text-[12px] font-semibold text-ink hover:border-ink disabled:opacity-60"
+              >
+                {verifyBusy ? "Sending…" : "Resend link"}
+              </button>
+            )}
           </div>
         )}
 

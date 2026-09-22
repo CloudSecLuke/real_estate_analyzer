@@ -42,7 +42,8 @@ export async function proxy(request: NextRequest) {
     pathname === "/api/auth/login" ||
     pathname === "/api/auth/signup" ||
     pathname === "/api/auth/forgot" ||
-    pathname === "/api/auth/reset"
+    pathname === "/api/auth/reset" ||
+    pathname === "/api/auth/verify-email"
   ) {
     return NextResponse.next();
   }

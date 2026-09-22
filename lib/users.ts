@@ -84,7 +84,9 @@ function sha256hex(s: string): string {
 }
 
 /** Returns the raw token to email, or null when no reset is possible
- *  (unknown user, founder, or no email on file). */
+ *  (unknown user, founder, or no VERIFIED email on file). An unverified
+ *  address is treated as absent (PROP-7) — we never send a reset link to an
+ *  address the account owner hasn't proven they control. */
 export async function createResetToken(
   username: string
 ): Promise<{ token: string; email: string } | null> {
@@ -92,7 +94,8 @@ export async function createResetToken(
   if (!isUsersDbConfigured() || isFounder(u)) return null;
   const sql = getSql();
   const rows = (await sql`
-    SELECT email FROM users WHERE username = ${u}
+    SELECT email FROM users
+    WHERE username = ${u} AND email_verified_at IS NOT NULL
   `) as { email: string | null }[];
   const email = rows[0]?.email;
   if (!email) return null;
@@ -102,6 +105,80 @@ export async function createResetToken(
     VALUES (${sha256hex(token)}, ${u}, now() + make_interval(mins => ${RESET_TTL_MIN}))
   `;
   return { token, email };
+}
+
+// --- email verification (PROP-7) -------------------------------------------
+// Same single-use hashed-token pattern as password reset, 24h expiry. An
+// account stays valid without a verified email (email is optional) — but its
+// address receives no account mail until verified.
+
+const VERIFY_TTL_HOURS = 24;
+
+/** Mint a verification token for the user's current email, or null when there
+ *  is nothing to verify (no DB, founder, no email, or already verified). */
+export async function createEmailVerification(
+  username: string
+): Promise<{ token: string; email: string } | null> {
+  const u = username.trim().toLowerCase();
+  if (!isUsersDbConfigured() || isFounder(u)) return null;
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT email, email_verified_at FROM users WHERE username = ${u}
+  `) as { email: string | null; email_verified_at: string | null }[];
+  const row = rows[0];
+  if (!row?.email || row.email_verified_at) return null; // nothing to verify
+  const token = randomBytes(32).toString("hex");
+  await sql`
+    INSERT INTO email_verifications (token_hash, username, email, expires_at)
+    VALUES (${sha256hex(token)}, ${u}, ${row.email},
+            now() + make_interval(hours => ${VERIFY_TTL_HOURS}))
+  `;
+  return { token, email: row.email };
+}
+
+/** Consume a valid verification token and stamp the email verified. Only
+ *  marks verified if the stored email still matches the account's current
+ *  email (a later email change invalidates an outstanding link). */
+export async function verifyEmailToken(
+  token: string
+): Promise<{ ok: true; username: string } | { ok: false }> {
+  if (!isUsersDbConfigured() || !/^[0-9a-f]{64}$/.test(token)) {
+    return { ok: false };
+  }
+  const sql = getSql();
+  const rows = (await sql`
+    UPDATE email_verifications SET used_at = now()
+    WHERE token_hash = ${sha256hex(token)}
+      AND used_at IS NULL AND expires_at > now()
+    RETURNING username, email
+  `) as { username: string; email: string }[];
+  const row = rows[0];
+  if (!row) return { ok: false };
+  const updated = (await sql`
+    UPDATE users SET email_verified_at = now()
+    WHERE username = ${row.username} AND email = ${row.email}
+      AND email_verified_at IS NULL
+    RETURNING username
+  `) as { username: string }[];
+  // Token consumed either way; success is reported only if the address still
+  // matches (idempotent re-clicks after a change report failure, which is fine).
+  return updated[0] ? { ok: true, username: row.username } : { ok: false };
+}
+
+/** Account flags for the client (nudge banner + status). */
+export async function getAccountFlags(
+  username: string
+): Promise<{ hasEmail: boolean; emailVerified: boolean }> {
+  if (isFounder(username)) return { hasEmail: false, emailVerified: false };
+  if (!isUsersDbConfigured()) return { hasEmail: false, emailVerified: false };
+  const rows = (await getSql()`
+    SELECT email, email_verified_at FROM users WHERE username = ${username}
+  `) as { email: string | null; email_verified_at: string | null }[];
+  const row = rows[0];
+  return {
+    hasEmail: Boolean(row?.email),
+    emailVerified: Boolean(row?.email_verified_at),
+  };
 }
 
 /** Consumes a valid token and sets the new password. */

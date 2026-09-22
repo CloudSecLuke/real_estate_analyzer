@@ -3,6 +3,7 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 import { stripeKey } from "@/lib/stripe";
 import {
   FREE_PENCILS,
+  getAccountFlags,
   getEntitlement,
   INVESTOR_MONTHLY_PENCILS,
   INVESTOR_PRICE_USD,
@@ -14,9 +15,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const ent = await getEntitlement(user);
+    const [ent, flags] = await Promise.all([
+      getEntitlement(user),
+      getAccountFlags(user).catch(() => ({ hasEmail: false, emailVerified: false })),
+    ]);
     return NextResponse.json({
       ...ent,
+      ...flags,
       billingConfigured: Boolean(stripeKey()),
       limits: {
         free: FREE_PENCILS,

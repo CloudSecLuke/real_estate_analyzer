@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createUser, isUsersDbConfigured } from "@/lib/users";
+import { createUser, createEmailVerification, isUsersDbConfigured } from "@/lib/users";
+import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { checkRateLimit, ipKey, tooMany } from "@/lib/ratelimit";
+import { reportError } from "@/lib/reportError";
 import {
   createSessionToken,
   SESSION_COOKIE,
@@ -39,6 +41,27 @@ export async function POST(req: NextRequest) {
   const result = await createUser(username, password, email, ipKey(req));
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+
+  // Fire a verification link if they gave an email (PROP-7). Best-effort:
+  // a send failure must not block signup — the in-app nudge lets them resend.
+  if (email && isEmailConfigured()) {
+    try {
+      const v = await createEmailVerification(username);
+      if (v) {
+        const link = `${req.nextUrl.origin}/api/auth/verify-email?token=${v.token}`;
+        await sendEmail({
+          to: v.email,
+          subject: "Verify your email for PropPencil",
+          text:
+            `Welcome to PropPencil! Confirm this is your email so we can send ` +
+            `password resets and receipts here.\n\nVerify (link expires in 24 ` +
+            `hours):\n${link}\n\nIf you didn't sign up, ignore this email.`,
+        });
+      }
+    } catch (err) {
+      reportError(err, { event: "signup_verify_email_failed", severity: "error", username });
+    }
   }
 
   // sign the new account straight in (fresh account → version 0)
