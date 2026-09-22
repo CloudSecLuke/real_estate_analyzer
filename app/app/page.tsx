@@ -388,7 +388,12 @@ export default function Home() {
   const [justSaved, setJustSaved] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [billing, setBilling] = useState<BillingStatus | null>(null);
-  const [paywall, setPaywall] = useState<"upgrade" | "quota" | null>(null);
+  const [paywall, setPaywall] = useState<
+    "upgrade" | "quota" | "verify_email" | null
+  >(null);
+  const [emailInput, setEmailInput] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailMsg, setEmailMsg] = useState<string | null>(null);
   const [billingNote, setBillingNote] = useState<string | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
 
@@ -441,6 +446,30 @@ export default function Home() {
       // best-effort; the banner stays so they can retry
     } finally {
       setVerifyBusy(false);
+    }
+  }
+
+  async function submitEmail() {
+    if (emailBusy || !emailInput.trim()) return;
+    setEmailBusy(true);
+    setEmailMsg(null);
+    try {
+      const res = await fetch("/api/account/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: emailInput.trim() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setEmailMsg("Check your inbox for the verification link.");
+        refreshBilling();
+      } else {
+        setEmailMsg(json.error ?? "Couldn't save that — try again.");
+      }
+    } catch {
+      setEmailMsg("Couldn't save that — try again.");
+    } finally {
+      setEmailBusy(false);
     }
   }
 
@@ -622,7 +651,13 @@ export default function Home() {
       });
       const json = await res.json();
       if (res.status === 402) {
-        setPaywall(json.paywall === "quota" ? "quota" : "upgrade");
+        setPaywall(
+          json.paywall === "quota"
+            ? "quota"
+            : json.paywall === "verify_email"
+              ? "verify_email"
+              : "upgrade"
+        );
         setPhase(data ? "results" : "empty");
         refreshBilling();
         if (stepTimer.current) {
@@ -1122,7 +1157,67 @@ export default function Home() {
           </div>
         )}
 
-        {paywall && (
+        {paywall === "verify_email" && (
+          <div className="flex flex-col gap-[14px] rounded-[10px] border border-border border-l-4 border-l-pencil bg-card px-5 py-[18px]">
+            <div className="flex flex-col gap-[4px]">
+              <span className="text-[15px] font-extrabold tracking-[-.01em] text-ink">
+                Verify your email to run your free pencil.
+              </span>
+              <p className="max-w-[64ch] text-[13px] leading-[1.6] text-body">
+                Confirming your email keeps free analyses fair and lets us send
+                you password resets. It takes a few seconds — click the link we
+                email you, then run your address again.
+              </p>
+            </div>
+            {billing?.hasEmail ? (
+              <div className="flex flex-wrap items-center gap-[10px]">
+                {verifySent ? (
+                  <span className="text-[12.5px] font-semibold text-positive">
+                    Sent — check your inbox, then re-run.
+                  </span>
+                ) : (
+                  <button
+                    onClick={resendVerification}
+                    disabled={verifyBusy}
+                    className="cursor-pointer rounded-[7px] bg-pencil px-4 py-[9px] text-[13px] font-extrabold text-ink hover:bg-pencil-dark disabled:opacity-60"
+                  >
+                    {verifyBusy ? "Sending…" : "Resend verification link"}
+                  </button>
+                )}
+                <button
+                  onClick={() => setPaywall(null)}
+                  className="cursor-pointer px-2 py-[9px] text-[12.5px] font-semibold text-label hover:text-ink"
+                >
+                  Not now
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-[8px]">
+                <div className="flex flex-wrap items-center gap-[8px]">
+                  <input
+                    type="email"
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="you@example.com"
+                    className="min-w-[220px] flex-1 rounded-[7px] border border-input-border bg-paper px-3 py-[8px] text-[13px] text-ink"
+                  />
+                  <button
+                    onClick={submitEmail}
+                    disabled={emailBusy || !emailInput.trim()}
+                    className="cursor-pointer rounded-[7px] bg-pencil px-4 py-[9px] text-[13px] font-extrabold text-ink hover:bg-pencil-dark disabled:opacity-60"
+                  >
+                    {emailBusy ? "Sending…" : "Send verification"}
+                  </button>
+                </div>
+                {emailMsg && (
+                  <span className="text-[12px] font-medium text-body">{emailMsg}</span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {(paywall === "upgrade" || paywall === "quota") && (
           <div className="flex flex-col gap-[14px] rounded-[10px] border border-border border-l-4 border-l-pencil bg-card px-5 py-[18px]">
             <div className="flex flex-col gap-[4px]">
               <span className="text-[15px] font-extrabold tracking-[-.01em] text-ink">

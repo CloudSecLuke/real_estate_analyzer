@@ -55,11 +55,19 @@ export async function POST(req: NextRequest) {
         error:
           permission.reason === "quota"
             ? "You've used this month's pencil allowance."
-            : permission.reason === "ip_capped"
-              ? "Free analyses aren't available from this connection right now — subscribe to keep penciling."
-              : "You've used your free pencil.",
-        // ip_capped shares the upgrade CTA on the client (non-"quota" → upgrade).
-        paywall: permission.reason === "quota" ? "quota" : "upgrade",
+            : permission.reason === "verify_email"
+              ? "Verify your email to unlock your free pencil."
+              : permission.reason === "ip_capped"
+                ? "Free analyses aren't available from this connection right now — subscribe to keep penciling."
+                : "You've used your free pencil.",
+        // verify_email gets its own client prompt; ip_capped shares the
+        // upgrade CTA (any non-"quota"/"verify_email" → upgrade).
+        paywall:
+          permission.reason === "quota"
+            ? "quota"
+            : permission.reason === "verify_email"
+              ? "verify_email"
+              : "upgrade",
       },
       { status: 402 }
     );

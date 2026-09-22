@@ -320,7 +320,32 @@ export async function getEntitlement(username: string): Promise<Entitlement> {
 
 export type PencilPermission =
   | { allowed: true; source: "founder" | "plan" | "free" }
-  | { allowed: false; reason: "upgrade" | "quota" | "ip_capped" };
+  | { allowed: false; reason: "upgrade" | "quota" | "ip_capped" | "verify_email" };
+
+// Layer-2 abuse gate (PROP-13 / PROP-7): the free pencil requires a verified
+// email — the strongest deterrent against scripted throwaway signups. On by
+// default; set FREE_PENCIL_REQUIRES_VERIFIED_EMAIL=0 to disable without a
+// deploy if it ever hurts conversion.
+export function freePencilRequiresVerifiedEmail(): boolean {
+  return process.env.FREE_PENCIL_REQUIRES_VERIFIED_EMAIL !== "0";
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Set/replace the account email and reset its verification (PROP-7). Lets a
+ *  free-tier user add or fix an address so they can pass the verify gate. */
+export async function setUserEmail(
+  username: string,
+  email: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const e = email.trim().toLowerCase().slice(0, 200);
+  if (!EMAIL_RE.test(e)) return { ok: false, error: "Enter a valid email address." };
+  if (!isUsersDbConfigured()) return { ok: false, error: "Not available right now." };
+  await getSql()`
+    UPDATE users SET email = ${e}, email_verified_at = NULL WHERE username = ${username}
+  `;
+  return { ok: true };
+}
 
 // Free-tier abuse cap (PROP-13): at most this many free-tier accounts from a
 // single signup IP get their free pencil within a rolling week. The 4th+
@@ -373,6 +398,10 @@ export async function canPencil(username: string): Promise<PencilPermission> {
       : { allowed: false, reason: "quota" };
   }
   if (ent.freeRemaining > 0) {
+    if (freePencilRequiresVerifiedEmail()) {
+      const flags = await getAccountFlags(username);
+      if (!flags.emailVerified) return { allowed: false, reason: "verify_email" };
+    }
     return (await freeTierBlocked(username))
       ? { allowed: false, reason: "ip_capped" }
       : { allowed: true, source: "free" };
