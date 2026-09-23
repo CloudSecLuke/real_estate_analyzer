@@ -24,7 +24,7 @@ export default function SignupPage() {
       const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, email: email || null }),
+        body: JSON.stringify({ username, password, email }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Sign-up failed");
@@ -117,9 +117,13 @@ export default function SignupPage() {
 
             <label className="flex flex-col gap-[6px]">
               <span className="text-[11px] font-bold uppercase tracking-[.1em] text-label">
-                Email <span className="font-medium normal-case">(optional, for receipts)</span>
+                Email{" "}
+                <span className="font-medium normal-case">
+                  (we&apos;ll send a link to verify it)
+                </span>
               </span>
               <input
+                required
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}

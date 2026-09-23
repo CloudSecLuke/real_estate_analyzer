@@ -332,6 +332,11 @@ export function freePencilRequiresVerifiedEmail(): boolean {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Minimal email-shape check shared by signup and setUserEmail. */
+export function isValidEmail(email: string): boolean {
+  return EMAIL_RE.test(email.trim());
+}
+
 /** Set/replace the account email and reset its verification (PROP-7). Lets a
  *  free-tier user add or fix an address so they can pass the verify gate. */
 export async function setUserEmail(

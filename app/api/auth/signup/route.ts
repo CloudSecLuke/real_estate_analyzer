@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createUser, createEmailVerification, isUsersDbConfigured } from "@/lib/users";
+import {
+  createUser,
+  createEmailVerification,
+  isUsersDbConfigured,
+  isValidEmail,
+} from "@/lib/users";
 import { isEmailConfigured, sendEmail } from "@/lib/email";
 import { checkRateLimit, ipKey, tooMany } from "@/lib/ratelimit";
 import { reportError } from "@/lib/reportError";
@@ -26,14 +31,24 @@ export async function POST(req: NextRequest) {
   }
   let username = "";
   let password = "";
-  let email: string | null = null;
+  let email = "";
   try {
     const body = await req.json();
     username = String(body.username ?? "").trim().toLowerCase();
     password = String(body.password ?? "");
-    email = body.email ? String(body.email).trim().slice(0, 200) : null;
+    email = String(body.email ?? "").trim().slice(0, 200);
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  // Email is required at signup (PROP-7 / PROP-13 layer 2): the free pencil
+  // needs a verified address, so collect and validate it up front rather than
+  // stalling the user at their first analysis.
+  if (!isValidEmail(email)) {
+    return NextResponse.json(
+      { error: "Enter a valid email address." },
+      { status: 400 }
+    );
   }
 
   // Store the hashed signup IP so free pencils can be capped per IP/week
