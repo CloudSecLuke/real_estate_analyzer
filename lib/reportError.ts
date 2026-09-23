@@ -12,7 +12,7 @@
 //  - No PII beyond username. Never pass request bodies, emails, tokens, or
 //    provider payloads as context.
 
-import * as Sentry from "@sentry/node";
+import * as Sentry from "@sentry/nextjs";
 
 type Severity = "alert" | "error";
 
