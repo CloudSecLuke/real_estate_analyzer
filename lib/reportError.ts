@@ -12,6 +12,8 @@
 //  - No PII beyond username. Never pass request bodies, emails, tokens, or
 //    provider payloads as context.
 
+import * as Sentry from "@sentry/node";
+
 type Severity = "alert" | "error";
 
 export interface ErrorContext {
@@ -47,12 +49,21 @@ export function reportError(err: unknown, ctx: ErrorContext): void {
     // and `"severity":"alert"` for the wake-someone paths.
     console.error(JSON.stringify(payload));
 
-    // --- Sentry seam -------------------------------------------------------
-    // When a DSN is provisioned, initialise Sentry once at module load and
-    // forward here, e.g.:
-    //   if (sentry) sentry.captureException(err, { tags: { event: ctx.event,
-    //     severity: ctx.severity }, user: ctx.username ? { username: ctx.username } : undefined });
-    // Kept as a no-op seam so this file has zero external dependency today.
+    // Forward to Sentry when a DSN is configured (initialised in
+    // instrumentation.ts). captureException no-ops without an active client,
+    // so this is safe when Sentry is off. severity → Sentry level lets an
+    // alert rule fire only on the wake-someone paths (level:fatal).
+    if (process.env.SENTRY_DSN) {
+      Sentry.captureException(
+        err instanceof Error ? err : new Error(String(payload.error.message)),
+        {
+          level: (ctx.severity ?? "error") === "alert" ? "fatal" : "error",
+          tags: { event: ctx.event, severity: ctx.severity ?? "error" },
+          user: ctx.username ? { username: ctx.username } : undefined,
+          extra: ctx.extra,
+        }
+      );
+    }
   } catch {
     // Reporting must never break the caller. If even console.error throws
     // (it shouldn't), stay silent — the original graceful path continues.
