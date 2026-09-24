@@ -14,7 +14,11 @@ export async function proxy(request: NextRequest) {
 
   // Routes with their own auth: Stripe signs webhook calls; the health
   // endpoint checks CRON_SECRET / founder session itself.
-  if (pathname === "/api/billing/webhook" || pathname === "/api/health") {
+  if (
+    pathname === "/api/billing/webhook" ||
+    pathname === "/api/health" ||
+    pathname === "/api/sentry-check" // TEMPORARY: PROP-9 delivery check
+  ) {
     return NextResponse.next();
   }
 
